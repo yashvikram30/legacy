@@ -1,0 +1,25 @@
+# Environment variables
+.env
+.env*.local
+*.pem
+*.key
+*.secret
+
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Foundry / Solidity artifacts
+legacy-contract/out/
+legacy-contract/cache/
+legacy-contract/broadcast/
+legacy-contract/flattened/
+legacy-contract/.gas-snapshot
+
+# System files
+.DS_Store
+Thumbs.db
+*.log
