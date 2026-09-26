@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { VaultStatus } from "@/lib/constants";
+import { VaultStatus, VAULT_STATUS_COPY, humanDuration } from "@/lib/constants";
 import { RadialChronometer } from "./RadialChronometer";
 
 interface LivenessPanelProps {
@@ -9,63 +9,57 @@ interface LivenessPanelProps {
   lastCheckIn: bigint;
   checkInInterval: bigint;
   gracePeriod: bigint;
+  contestableWindow: bigint;
   livenessRegistered: boolean;
   isSettling?: boolean;
   onOpenCheckIn: () => void;
+  onEditTiming: () => void;
 }
 
+const TRACK: { status: VaultStatus; label: string }[] = [
+  { status: VaultStatus.Green, label: "Active" },
+  { status: VaultStatus.Amber, label: "Grace period" },
+  { status: VaultStatus.Red, label: "Claims open" },
+];
+
+function formatCountdown(totalSecs: number) {
+  const d = Math.floor(totalSecs / 86400);
+  const h = Math.floor((totalSecs % 86400) / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (d > 0) return `${d}d ${pad(h)}h ${pad(m)}m`;
+  if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
+  return `${pad(m)}m ${pad(s)}s`;
+}
+
+/**
+ * The vault's single status card: a dial with the live countdown, one
+ * sentence on what it means, one action, and the vault's timing rules.
+ */
 export function LivenessPanel({
   status,
   lastCheckIn,
   checkInInterval,
   gracePeriod,
+  contestableWindow,
   livenessRegistered,
   isSettling,
   onOpenCheckIn,
+  onEditTiming,
 }: LivenessPanelProps) {
-  const [timeText, setTimeText] = useState<string>("Calculating...");
-  const [timeLabel, setTimeLabel] = useState<string>("");
   const [elapsed, setElapsed] = useState<number>(0);
 
   useEffect(() => {
-    const update = () => {
-      const now = Math.floor(Date.now() / 1000);
-      const lastSec = Number(lastCheckIn);
-      const intervalSec = Number(checkInInterval);
-      const graceSec = Number(gracePeriod);
-      const elapsedSec = now - lastSec;
-      setElapsed(elapsedSec);
-
-      const fmt = (totalSecs: number) => {
-        const d = Math.floor(totalSecs / 86400);
-        const h = Math.floor((totalSecs % 86400) / 3600);
-        const m = Math.floor((totalSecs % 3600) / 60);
-        const s = totalSecs % 60;
-        if (d > 0) return `${d}d ${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
-        return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
-      };
-
-      if (status === VaultStatus.Green) {
-        setTimeLabel("Next heartbeat due in");
-        setTimeText(fmt(Math.max(0, intervalSec - elapsedSec)));
-      } else if (status === VaultStatus.Amber) {
-        setTimeLabel("Turning Red in");
-        setTimeText(fmt(Math.max(0, intervalSec + graceSec - elapsedSec)));
-      } else {
-        setTimeLabel("Overdue by");
-        setTimeText(fmt(Math.max(0, elapsedSec - (intervalSec + graceSec))));
-      }
-    };
-
+    const update = () => setElapsed(Math.floor(Date.now() / 1000) - Number(lastCheckIn));
     update();
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [status, lastCheckIn, checkInInterval, gracePeriod]);
+  }, [lastCheckIn]);
 
   const intervalSec = Number(checkInInterval);
   const graceSec = Number(gracePeriod);
-  // Give the red zone a visible arc segment (defaults to the grace span, or the
-  // interval when there is no grace period) so the danger threshold reads on the dial.
+  // Give the red zone a visible arc segment so the danger threshold reads on the dial.
   const redSpan = graceSec > 0 ? graceSec : Math.max(intervalSec, 1);
   const thresholds = {
     green: intervalSec,
@@ -73,110 +67,94 @@ export function LivenessPanel({
     max: intervalSec + graceSec + redSpan,
   };
 
-  const isRegistered = livenessRegistered ?? true;
-  const lampClass = !isRegistered
-    ? "amber"
-    : status === VaultStatus.Green
-    ? "green"
-    : status === VaultStatus.Amber
-    ? "amber"
-    : "red";
-  const statusColor =
-    lampClass === "green" ? "var(--status-green)" : lampClass === "amber" ? "var(--status-amber)" : "var(--status-red)";
-  const bigWord = !isRegistered
-    ? "PENDING"
-    : status === VaultStatus.Green
-    ? "GREEN"
-    : status === VaultStatus.Amber
-    ? "AMBER"
-    : "RED";
-  const statusDescription = !isRegistered
-    ? "Vault deployed. Complete initial World ID Orb registration to activate automated heartbeat protection."
-    : status === VaultStatus.Green
-    ? "Autonomous zero-knowledge World ID Orb heartbeat active on World Chain."
-    : status === VaultStatus.Amber
-    ? "Check-in cadence exceeded. Grace period active before inheritance claims unlock."
-    : "Liveness expired. Designated beneficiaries are authorized to execute succession.";
+  const { timeLabel, timeText } =
+    status === VaultStatus.Green
+      ? { timeLabel: "Next check-in in", timeText: formatCountdown(Math.max(0, intervalSec - elapsed)) }
+      : status === VaultStatus.Amber
+      ? { timeLabel: "Claims open in", timeText: formatCountdown(Math.max(0, intervalSec + graceSec - elapsed)) }
+      : { timeLabel: "Claims open for", timeText: formatCountdown(Math.max(0, elapsed - (intervalSec + graceSec))) };
 
-  // Before registration there is no meaningful elapsed clock — render an empty dial.
-  const chronoValue = isRegistered ? elapsed : 0;
+  const statusColor = "var(--text-secondary)";
+
+  const headline = !livenessRegistered
+    ? "Set up World ID to start"
+    : status === VaultStatus.Green
+    ? "You're all set"
+    : status === VaultStatus.Amber
+    ? "You missed a check-in"
+    : "Your heirs can claim";
+
+  const description = !livenessRegistered
+    ? "Link your World ID once. After that, checking in takes one scan."
+    : status === VaultStatus.Green
+    ? "Nothing to do until the timer runs out."
+    : status === VaultStatus.Amber
+    ? "Check in before the grace period ends to keep your vault active."
+    : "Check in now to cancel any claim and reset the clock.";
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "20px",
-        width: "100%",
-      }}
-    >
-      <div className="animate-fade-up" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        <RadialChronometer
-          value={chronoValue}
-          thresholds={thresholds}
-          size={240}
-          strokeWidth={13}
-          className={isSettling ? "lamp-settle-animation" : undefined}
-        >
-          <span
-            style={{
-              fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-              fontSize: "1.5rem",
-              fontWeight: 900,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: statusColor,
-              lineHeight: 1.1,
-            }}
-          >
-            {bigWord}
-          </span>
-          <span
-            className="font-data"
-            style={{ fontSize: "1.0625rem", fontWeight: 700, color: "#ffffff", marginTop: 4 }}
-            aria-live="polite"
-          >
-            {timeText}
-          </span>
-          <span
-            style={{
-              fontSize: "0.6875rem",
-              color: "var(--text-secondary)",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginTop: 2,
-              maxWidth: 130,
-            }}
-          >
-            {timeLabel}
-          </span>
-        </RadialChronometer>
-
-        <p
-          style={{
-            fontSize: "0.8125rem",
-            color: "var(--text-secondary)",
-            textAlign: "center",
-            maxWidth: 380,
-            lineHeight: 1.5,
-            margin: 0,
-          }}
-        >
-          {statusDescription}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={onOpenCheckIn}
-        className="btn-hero-action"
-        id="trigger-checkin-btn"
-        style={{ marginTop: 0, padding: "13px 32px", justifyContent: "center", fontSize: "0.875rem" }}
+    <section className="console-card status-card" aria-label="Vault status">
+      <RadialChronometer
+        value={livenessRegistered ? elapsed : 0}
+        thresholds={thresholds}
+        size={200}
+        strokeWidth={10}
+        className={isSettling ? "lamp-settle-animation" : undefined}
       >
-        <span>{livenessRegistered ? "Conduct World ID Check-in" : "Register with World ID"}</span>
-        <span className="arrow-icon" aria-hidden="true">→</span>
-      </button>
-    </div>
+        {livenessRegistered ? (
+          <>
+            <span className="status-dial-label">{timeLabel}</span>
+            <span className="status-dial-time font-data" aria-live="polite">
+              {timeText}
+            </span>
+          </>
+        ) : (
+          <span className="status-dial-label">Not set up</span>
+        )}
+      </RadialChronometer>
+
+      <div className="status-body">
+        <h2 className="status-headline" style={{ color: livenessRegistered ? "#ffffff" : statusColor }}>
+          {headline}
+        </h2>
+        <p className="status-desc">{description}</p>
+
+        <button type="button" onClick={onOpenCheckIn} className="flow-btn status-cta" id="trigger-checkin-btn">
+          {livenessRegistered ? "Check in with World ID" : "Set up World ID"}
+        </button>
+
+        <ol className="status-track" aria-label="Vault lifecycle">
+          {TRACK.map((step) => {
+            const isCurrent = livenessRegistered && step.status === status;
+            const isPast = livenessRegistered && step.status < status;
+            return (
+              <li
+                key={step.label}
+                className={`status-track-step${isCurrent ? " is-current" : ""}${isPast ? " is-past" : ""}`}
+                style={isCurrent ? ({ "--track-color": VAULT_STATUS_COPY[step.status].color } as React.CSSProperties) : undefined}
+                aria-current={isCurrent ? "step" : undefined}
+              >
+                {step.label}
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="status-timing">
+          <span>
+            Check in every <strong>{humanDuration(intervalSec)}</strong>
+          </span>
+          <span>
+            Grace <strong>{humanDuration(graceSec)}</strong>
+          </span>
+          <span>
+            Veto window <strong>{humanDuration(Number(contestableWindow))}</strong>
+          </span>
+          <button type="button" onClick={onEditTiming} className="flow-link status-timing-edit">
+            Change
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }

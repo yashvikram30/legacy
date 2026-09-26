@@ -77,27 +77,19 @@ export function GuardianList({
               margin: 0,
             }}
           >
-            Trusted Guardians
+            Guardians
           </h3>
           <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "4px", lineHeight: 1.5, maxWidth: 620 }}>
-            People you trust to confirm your passing. If <strong style={{ color: "#EDEAE3" }}>all</strong> of them attest that
-            you&apos;ve died, every timelock on this vault is cut by 99% — so your heirs can inherit almost immediately instead of
-            waiting out the full cadence. Any World ID check-in you make instantly cancels their votes.
+            People who can confirm your passing. If all of them do, your heirs can inherit almost immediately. Checking in cancels it.
           </p>
         </div>
         {!isGreen && (
-          <span
-            style={{
-              fontSize: "0.75rem",
-              fontFamily: "var(--font-data)",
-              color: "var(--status-amber)",
-              border: "1px solid var(--status-amber)",
-              padding: "4px 10px",
-              borderRadius: 0,
-              textTransform: "uppercase",
-            }}
-          >
-            Modifications Locked (Vault Not Green)
+          <span className="lock-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            Check in to make changes
           </span>
         )}
       </div>
@@ -198,7 +190,7 @@ export function GuardianList({
           }}
         >
           <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0 }}>
-            No guardians nominated yet. Add trusted people above — a vault with no guardians can never be accelerated.
+            {isGreen ? "No guardians yet. Add someone you trust above." : "No guardians yet. Check in to start adding them."}
           </p>
         </div>
       ) : (

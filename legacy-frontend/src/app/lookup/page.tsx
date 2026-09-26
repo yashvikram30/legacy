@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { isAddress } from "viem";
 import { useReadContract } from "wagmi";
-import { VaultStatus, CONTRACT_ADDRESSES } from "@/lib/constants";
+import { VaultStatus, CONTRACT_ADDRESSES, shortAddress, humanDuration, timeAgo } from "@/lib/constants";
+import { fetchVaultMeta, type VaultMetaRecord } from "@/lib/vault-meta/client";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { StatusLamp } from "@/components/StatusLamp";
 import { TransparencyLookupSkeleton } from "@/components/Skeleton";
@@ -48,20 +51,59 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+const WORLDSCAN = "https://sepolia.worldscan.org/address";
+
+const WHAT_YOU_SEE = [
+  { value: "STATUS", label: "Is the owner still checking in?" },
+  { value: "LAST CHECK-IN", label: "When they last proved they're alive" },
+  { value: "TIMING", label: "How long until heirs can claim" },
+];
+
+/** One label/value row in the results list. */
+function FactRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="data-row" style={{ alignItems: "center" }}>
+      <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, color: "#ffffff", textAlign: "right" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function TransparencyLookup() {
   const [searchInput, setSearchInput] = useState<string>("");
   const [queriedAddress, setQueriedAddress] = useState<`0x${string}` | null>(null);
+  const searchParams = useSearchParams();
+
+  // Shareable deep link (?v=0x...) — same convention as the claim page
+  useEffect(() => {
+    const v = searchParams.get("v");
+    if (v && isAddress(v)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prefilling from URL on mount, not a derived-state loop
+      setSearchInput(v);
+      setQueriedAddress(v as `0x${string}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const trimmedInput = searchInput.trim();
+  const inputIsValid = isAddress(trimmedInput);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = searchInput.trim();
-    if (!trimmed.startsWith("0x") || trimmed.length !== 42) return;
-    setQueriedAddress(trimmed as `0x${string}`);
+    if (!inputIsValid) return;
+    setQueriedAddress(trimmedInput as `0x${string}`);
   };
 
   const handleQuickLoadSmoke = () => {
     setSearchInput(CONTRACT_ADDRESSES.smokeVault);
     setQueriedAddress(CONTRACT_ADDRESSES.smokeVault);
+  };
+
+  const handleReset = () => {
+    setSearchInput("");
+    setQueriedAddress(null);
   };
 
   // ── Reads ─────────────────────────────────────────────────────────
@@ -86,7 +128,7 @@ export default function TransparencyLookup() {
     query: { enabled: Boolean(queriedAddress) },
   });
 
-  const { data: lastCheckInRaw, isLoading: isLastCheckInLoading } = useReadContract({
+  const { data: lastCheckInRaw } = useReadContract({
     address: queriedAddress ?? undefined,
     abi: LegacyVaultABI,
     functionName: "lastCheckIn",
@@ -121,6 +163,20 @@ export default function TransparencyLookup() {
     query: { enabled: Boolean(queriedAddress) },
   });
 
+  // Off-chain display names (vault + owner); falls back to addresses.
+  const [vaultMeta, setVaultMeta] = useState<VaultMetaRecord | null>(null);
+  useEffect(() => {
+    if (!queriedAddress) return;
+    let cancelled = false;
+    fetchVaultMeta(queriedAddress).then((meta) => {
+      if (!cancelled) setVaultMeta(meta);
+    });
+    return () => {
+      cancelled = true;
+      setVaultMeta(null);
+    };
+  }, [queriedAddress]);
+
   // ── Derived ───────────────────────────────────────────────────────
   const vaultStatus = rawStatus !== undefined ? (Number(rawStatus) as VaultStatus) : null;
 
@@ -128,70 +184,48 @@ export default function TransparencyLookup() {
   const checkInInterval = intervalRaw !== undefined ? BigInt(intervalRaw.toString()) : BigInt(86400 * 30);
   const gracePeriod = gracePeriodRaw !== undefined ? BigInt(gracePeriodRaw.toString()) : BigInt(86400 * 7);
 
-  const lastCheckInDate =
-    lastCheckInRaw !== undefined && Number(lastCheckInRaw) > 0
-      ? new Date(Number(lastCheckInRaw) * 1000).toUTCString()
-      : null;
-
-  const cadenceDays =
-    intervalRaw !== undefined ? Math.round(Number(intervalRaw) / 86400) : null;
-
-  const graceDays =
-    gracePeriodRaw !== undefined ? Math.round(Number(gracePeriodRaw) / 86400) : null;
-
-  const contestableHours =
-    contestableWindowRaw !== undefined ? Math.round(Number(contestableWindowRaw) / 3600) : null;
+  const lastCheckInSeconds = lastCheckInRaw !== undefined ? Number(lastCheckInRaw) : 0;
+  const ownerAddress = owner ? String(owner) : null;
+  const heirTotal = heirCount !== undefined ? Number(heirCount) : null;
 
   const isLoading = isStatusLoading || isOwnerLoading;
+  const showError = queriedAddress && !isLoading && (isStatusError || vaultStatus === null);
+  const showResult = queriedAddress && !isLoading && vaultStatus !== null;
 
   return (
     <div className="landing-canvas" style={{ minHeight: "calc(100vh - var(--header-height, 64px))", padding: "40px 24px 96px" }}>
       <div className="app-container">
-        {/* Navigation Breadcrumbs Bar */}
-        <div style={{ marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <Link
-              href="/"
-              className="btn-secondary"
-              style={{ padding: "6px 14px", fontSize: "0.8125rem", borderRadius: "0px", borderColor: "rgba(255, 255, 255, 0.2)" }}
-            >
-              <span>←</span> Home
-            </Link>
-            <span className="section-tag" style={{ margin: 0 }}>
-              [ 03 // PUBLIC TRANSPARENCY & VERIFICATION ]
-            </span>
-          </div>
-
+        <div style={{ marginBottom: "24px" }}>
+          <Link
+            href="/"
+            className="btn-secondary"
+            style={{ padding: "6px 14px", fontSize: "0.8125rem", borderRadius: "0px", borderColor: "rgba(255, 255, 255, 0.2)" }}
+          >
+            <span>←</span> Home
+          </Link>
         </div>
 
-        {/* ── Main Instrument Container ────────────────────────────── */}
         <div className="panel-instrument" style={{ background: "#000000", border: "1px solid rgba(255, 255, 255, 0.2)" }}>
-
           {/* Header */}
           <div style={{ padding: "36px 32px 28px", borderBottom: "1px solid rgba(255, 255, 255, 0.12)" }}>
             <h1
               className="section-title"
-              style={{
-                fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-                fontSize: "clamp(1.8rem, 3.5vw, 2.6rem)",
-                marginBottom: "12px",
-              }}
+              style={{ fontSize: "clamp(1.8rem, 3.5vw, 2.6rem)", marginBottom: "10px" }}
             >
-              PUBLIC TRANSPARENCY LOOKUP
+              LOOK UP A VAULT
             </h1>
-
-            <p style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", lineHeight: 1.6, maxWidth: 640 }}>
-              Public read-only inspection instrument. Verify the real-time cryptographic liveness status, World ID Orb verification binding, and timelock parameters of any succession vault on World Chain. Zero backend or centralized dependencies.
+            <p className="section-lead" style={{ fontSize: "0.9375rem" }}>
+              Paste a vault address to see if its owner is still checking in. No wallet needed.
             </p>
           </div>
 
-          {/* Search form */}
+          {/* Search */}
           <div style={{ padding: "28px 32px", borderBottom: "1px solid rgba(255, 255, 255, 0.12)", background: "rgba(255, 255, 255, 0.02)" }}>
             <form onSubmit={handleSearch} style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               <input
                 type="text"
                 className="input-instrument font-data"
-                placeholder="0x… (42-character clone vault address)"
+                placeholder="Vault address (0x…)"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 style={{
@@ -204,134 +238,111 @@ export default function TransparencyLookup() {
                 autoComplete="off"
                 spellCheck={false}
                 id="vault-lookup-input"
+                aria-label="Vault address"
               />
               <button
                 type="submit"
                 className="btn-brass"
                 style={{ whiteSpace: "nowrap", padding: "12px 28px" }}
                 id="vault-lookup-btn"
-                disabled={!searchInput.trim().startsWith("0x") || searchInput.trim().length !== 42}
+                disabled={!inputIsValid}
               >
-                LOOKUP VAULT
+                LOOK UP
               </button>
             </form>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, flexWrap: "wrap", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Quick test:</span>
+              {CONTRACT_ADDRESSES.smokeVault && !queriedAddress ? (
                 <button
                   type="button"
                   onClick={handleQuickLoadSmoke}
-                  style={{
-                    background: "rgba(255, 255, 255, 0.06)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    padding: "4px 10px",
-                    color: "var(--accent-brass)",
-                    fontSize: "0.75rem",
-                    cursor: "pointer",
-                    fontFamily: "var(--font-data)",
-                  }}
+                  style={{ background: "none", border: "none", padding: 0, color: "var(--accent-brass)", fontSize: "0.8125rem", cursor: "pointer" }}
                   id="quick-load-smoke-vault-btn"
                 >
-                  Inspect Smoke Vault ({CONTRACT_ADDRESSES.smokeVault.slice(0, 6)}…{CONTRACT_ADDRESSES.smokeVault.slice(-4)})
+                  No address handy? Try an example vault →
                 </button>
-              </div>
+              ) : (
+                <span />
+              )}
 
-              {searchInput.length > 2 && !searchInput.startsWith("0x") && (
+              {trimmedInput.length > 0 && !inputIsValid && (
                 <span style={{ fontSize: "0.75rem", color: "var(--status-amber)" }}>
-                  Address must start with 0x
+                  That doesn&apos;t look like an address. It should be 0x followed by 40 characters.
                 </span>
               )}
             </div>
           </div>
 
-          {/* Empty state: No query yet */}
+          {/* Empty state: what a lookup shows */}
           {!queriedAddress && (
-            <div style={{ padding: "48px 32px" }}>
-              <div className="landing-section-header" style={{ marginBottom: "28px" }}>
-                <span className="section-tag">[ ARCHITECTURE GUARANTEES ]</span>
-                <h2 style={{ fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif", fontSize: "1.25rem", color: "#ffffff", textTransform: "uppercase" }}>
-                  Verifiable Cryptographic Proofs
-                </h2>
-              </div>
-
-              <div className="lifecycle-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px" }}>
-                <div className="lifecycle-card" style={{ padding: "24px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                    <span style={{ color: "var(--accent-brass)", fontWeight: "bold", fontSize: "0.8125rem" }}>01 //</span>
-                    <span style={{ fontFamily: "'Murs Gothic', sans-serif", fontSize: "0.9375rem", fontWeight: 800 }}>DIRECT RPC QUERY</span>
+            <div style={{ padding: "40px 32px" }}>
+              <span className="section-tag">[ WHAT YOU&apos;LL SEE ]</span>
+              <dl className="hero-facts" style={{ marginTop: 16, maxWidth: "none" }}>
+                {WHAT_YOU_SEE.map((item) => (
+                  <div key={item.value} className="hero-fact">
+                    <dt className="hero-fact-value" style={{ fontSize: "0.9375rem" }}>{item.value}</dt>
+                    <dd className="hero-fact-label">{item.label}</dd>
                   </div>
-                  <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                    Zero centralized servers or indexers. Every heartbeat timestamp, timer countdown, and heir mapping is queried straight from World Chain Sepolia node bytecode.
-                  </p>
-                </div>
-
-                <div className="lifecycle-card" style={{ padding: "24px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                    <span style={{ color: "var(--accent-brass)", fontWeight: "bold", fontSize: "0.8125rem" }}>02 //</span>
-                    <span style={{ fontFamily: "'Murs Gothic', sans-serif", fontSize: "0.9375rem", fontWeight: 800 }}>WORLD ID ORB PROOF</span>
-                  </div>
-                  <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                    Heartbeat liveness is anchored to World ID Semaphore zero-knowledge proofs. Liveness registration confirms Orb biometric verification without revealing user identity.
-                  </p>
-                </div>
-
-                <div className="lifecycle-card" style={{ padding: "24px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                    <span style={{ color: "var(--accent-brass)", fontWeight: "bold", fontSize: "0.8125rem" }}>03 //</span>
-                    <span style={{ fontFamily: "'Murs Gothic', sans-serif", fontSize: "0.9375rem", fontWeight: 800 }}>TIMELOCK AUTOMATION</span>
-                  </div>
-                  <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                    Status transitions (Green &rarr; Amber &rarr; Red) are determined strictly by immutable timestamps on World Chain block production, resistant to tampering.
-                  </p>
-                </div>
-              </div>
+                ))}
+              </dl>
             </div>
           )}
 
-          {/* Loading state */}
-          {queriedAddress && isLoading && (
-            <TransparencyLookupSkeleton queriedAddress={queriedAddress} />
-          )}
+          {/* Loading */}
+          {queriedAddress && isLoading && <TransparencyLookupSkeleton queriedAddress={queriedAddress} />}
 
-          {/* Error / Non-existent vault state */}
-          {queriedAddress && !isLoading && (isStatusError || vaultStatus === null) && (
-            <div style={{ padding: "48px 32px" }}>
+          {/* Not a vault */}
+          {showError && (
+            <div style={{ padding: "40px 32px" }}>
               <div style={{ background: "rgba(224, 90, 71, 0.1)", border: "1px solid var(--status-red)", padding: "24px" }}>
-                <span className="label-overline" style={{ color: "var(--status-red)" }}>
-                  LOOKUP REJECTED // INVALID VAULT ADDRESS
-                </span>
-                <p style={{ fontSize: "0.9375rem", color: "#ffffff", marginTop: "8px", lineHeight: 1.5 }}>
-                  The address <span className="font-data" style={{ color: "var(--accent-brass)" }}>{queriedAddress}</span> does not appear to be a deployed Legacy Vault on World Chain Sepolia (Chain ID 4801).
+                <p style={{ fontSize: "1rem", color: "#ffffff", margin: 0, fontWeight: 600 }}>No vault found at this address</p>
+                <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "6px", lineHeight: 1.5 }}>
+                  Double-check <span className="font-data" style={{ color: "var(--text-primary)" }}>{shortAddress(queriedAddress)}</span>. Only Legacy vaults on World Chain Sepolia can be looked up.
                 </p>
-                <div style={{ marginTop: "16px", display: "flex", gap: "12px", alignItems: "center" }}>
-                  <button
-                    type="button"
-                    onClick={handleQuickLoadSmoke}
-                    className="btn-brass"
-                    style={{ fontSize: "0.75rem", padding: "6px 14px" }}
-                  >
-                    Load Verified Smoke Vault Instead
+                <div style={{ marginTop: "16px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                  <button type="button" onClick={handleReset} className="btn-brass" style={{ fontSize: "0.75rem", padding: "6px 14px" }}>
+                    Try another address
                   </button>
                   <a
-                    href={`https://sepolia.worldscan.org/address/${queriedAddress}`}
+                    href={`${WORLDSCAN}/${queriedAddress}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-secondary"
                     style={{ fontSize: "0.75rem", padding: "6px 14px" }}
                   >
-                    Inspect on Worldscan ↗
+                    Open on Worldscan ↗
                   </a>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Queried Vault Result Display */}
-          {queriedAddress && !isLoading && vaultStatus !== null && (
+          {/* Result */}
+          {showResult && (
             <div style={{ padding: "32px" }}>
-              {/* Status Lamp Interactive Instrument Header */}
-              <div style={{ marginBottom: "32px", paddingBottom: "32px", borderBottom: "1px solid rgba(255, 255, 255, 0.12)" }}>
+              {/* Who / what this vault is */}
+              <div style={{ marginBottom: "24px" }}>
+                <h2
+                  style={{
+                    fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
+                    fontSize: "1.375rem",
+                    color: vaultMeta?.vaultName ? "#ffffff" : "var(--text-secondary)",
+                    letterSpacing: "0.03em",
+                    margin: 0,
+                  }}
+                >
+                  {vaultMeta?.vaultName ?? `Vault ${shortAddress(queriedAddress)}`}
+                </h2>
+                <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: 4 }}>
+                  Owned by{" "}
+                  <span style={{ color: "var(--text-primary)" }}>
+                    {vaultMeta?.ownerName ?? (ownerAddress ? shortAddress(ownerAddress) : "unknown")}
+                  </span>
+                </p>
+              </div>
+
+              {/* Big status dial */}
+              <div style={{ marginBottom: "28px", paddingBottom: "28px", borderBottom: "1px solid rgba(255, 255, 255, 0.12)" }}>
                 <StatusLamp
                   status={vaultStatus}
                   lastCheckIn={lastCheckIn}
@@ -341,190 +352,91 @@ export default function TransparencyLookup() {
                 />
               </div>
 
-              {/* 4-Stat Telemetry Strip — the big dial above already shows
-                  the status prominently, so this strip covers what it doesn't */}
-              <div className="hero-telemetry-strip" style={{ marginTop: 0, marginBottom: "32px" }}>
-                <div className="telemetry-cell">
-                  <span className="telemetry-label">WORLD ID ORB</span>
-                  <span
-                    className="telemetry-value"
-                    style={{
-                      fontSize: "0.875rem",
-                      color: livenessRegistered ? "var(--status-green)" : "var(--status-amber)",
-                    }}
-                  >
-                    {livenessRegistered ? "SEMAPHORE BOUND" : "NOT REGISTERED"}
-                  </span>
-                </div>
-
-                <div className="telemetry-cell">
-                  <span className="telemetry-label">CHECK-IN CADENCE</span>
-                  <span className="telemetry-value" style={{ fontSize: "0.875rem" }}>
-                    {cadenceDays ? `${cadenceDays} DAYS` : "—"}
-                  </span>
-                </div>
-
-                <div className="telemetry-cell">
-                  <span className="telemetry-label">BENEFICIARIES</span>
-                  <span className="telemetry-value" style={{ fontSize: "0.875rem" }}>
-                    {heirCount !== undefined ? `${heirCount.toString()} DESIGNATED` : "—"}
-                  </span>
-                </div>
-
-                <div className="telemetry-cell">
-                  <span className="telemetry-label">CONTESTABLE WINDOW</span>
-                  <span className="telemetry-value" style={{ fontSize: "0.875rem" }}>
-                    {contestableHours ? `${contestableHours} HOURS` : "—"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Comprehensive Specifications Data Matrix */}
-              <div style={{ border: "1px solid rgba(255, 255, 255, 0.12)", background: "#000000", padding: "0 24px" }}>
-                {/* Vault address */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Clone Vault Contract</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <span
-                      className="font-data"
-                      style={{ fontSize: "0.875rem", color: "#ffffff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                      title={queriedAddress}
-                    >
-                      {queriedAddress}
-                    </span>
-                    <CopyButton value={queriedAddress} />
-                    <a
-                      href={`https://sepolia.worldscan.org/address/${queriedAddress}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-secondary"
-                      style={{ padding: "2px 8px", fontSize: "0.6875rem", borderRadius: "0px" }}
-                      title="View contract on Worldscan"
-                    >
-                      Worldscan ↗
-                    </a>
-                  </div>
-                </div>
-
-                {/* Owner */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>Vault Owner</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    {owner ? (
-                      <>
-                        <span
-                          className="font-data"
-                          style={{ fontSize: "0.875rem", color: "#ffffff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                          title={owner as string}
-                        >
-                          {owner as string}
-                        </span>
-                        <CopyButton value={owner as string} />
-                        <a
-                          href={`https://sepolia.worldscan.org/address/${owner as string}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn-secondary"
-                          style={{ padding: "2px 8px", fontSize: "0.6875rem", borderRadius: "0px" }}
-                          title="View owner on Worldscan"
-                        >
-                          Worldscan ↗
-                        </a>
-                      </>
-                    ) : (
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>Unknown</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Last heartbeat */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)" }}>Last Verified Heartbeat</span>
-                  {isLastCheckInLoading ? (
-                    <span style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>—</span>
-                  ) : lastCheckInDate ? (
-                    <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                      {lastCheckInDate}
-                    </span>
+              {/* Facts, in plain language */}
+              <div style={{ border: "1px solid rgba(255, 255, 255, 0.12)", padding: "0 24px" }}>
+                <FactRow label="Last check-in">
+                  {/* The contract seeds lastCheckIn at creation, so it only reflects a real
+                      check-in once World ID is registered. */}
+                  {livenessRegistered && lastCheckInSeconds > 0 ? (
+                    <span title={new Date(lastCheckInSeconds * 1000).toLocaleString()}>{timeAgo(lastCheckInSeconds)}</span>
                   ) : (
-                    <span style={{ color: "var(--status-amber)", fontSize: "0.875rem" }}>No check-in recorded</span>
+                    <span style={{ color: "var(--status-amber)" }}>
+                      Never{lastCheckInSeconds > 0 ? ` (created ${timeAgo(lastCheckInSeconds)})` : ""}
+                    </span>
                   )}
-                </div>
-
-                {/* Check-in cadence */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)" }}>Check-In Cadence</span>
-                  <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                    {intervalRaw !== undefined ? `${cadenceDays} days (${Number(intervalRaw).toLocaleString()} seconds)` : "—"}
+                </FactRow>
+                <FactRow label="Checks in every">
+                  {intervalRaw !== undefined ? humanDuration(Number(intervalRaw)) : "—"}
+                </FactRow>
+                <FactRow label="Grace period after a miss">
+                  {gracePeriodRaw !== undefined ? humanDuration(Number(gracePeriodRaw)) : "—"}
+                </FactRow>
+                <FactRow label="Time to veto a claim">
+                  {contestableWindowRaw !== undefined ? humanDuration(Number(contestableWindowRaw)) : "—"}
+                </FactRow>
+                <FactRow label="Heirs">
+                  {heirTotal === null ? "—" : heirTotal === 0 ? "None yet" : String(heirTotal)}
+                </FactRow>
+                <FactRow label="World ID">
+                  <span style={{ color: livenessRegistered ? "var(--status-green)" : "var(--status-amber)" }}>
+                    {livenessRegistered ? "Verified" : "Not set up yet"}
                   </span>
-                </div>
-
-                {/* Grace period */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)" }}>Grace Period Window</span>
-                  <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                    {gracePeriodRaw !== undefined ? `${graceDays} days (${Number(gracePeriodRaw).toLocaleString()} seconds)` : "—"}
-                  </span>
-                </div>
-
-                {/* Contestable window */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)" }}>Contestable Challenge Window</span>
-                  <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                    {contestableWindowRaw !== undefined ? `${contestableHours} hours (${Number(contestableWindowRaw).toLocaleString()} seconds)` : "—"}
-                  </span>
-                </div>
-
-                {/* Authorized heirs */}
-                <div className="data-row">
-                  <span style={{ color: "var(--text-secondary)" }}>Authorized Beneficiary Count</span>
-                  <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                    {heirCount !== undefined ? heirCount.toString() : "—"}
-                  </span>
-                </div>
+                </FactRow>
+                <FactRow label="Owner address">
+                  {ownerAddress ? (
+                    <>
+                      <a
+                        href={`${WORLDSCAN}/${ownerAddress}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-data"
+                        style={{ color: "#ffffff", fontSize: "0.8125rem" }}
+                        title={ownerAddress}
+                      >
+                        {shortAddress(ownerAddress)} ↗
+                      </a>
+                      <CopyButton value={ownerAddress} />
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </FactRow>
+                <FactRow label="Vault address">
+                  <a
+                    href={`${WORLDSCAN}/${queriedAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-data"
+                    style={{ color: "#ffffff", fontSize: "0.8125rem" }}
+                    title={queriedAddress}
+                  >
+                    {shortAddress(queriedAddress)} ↗
+                  </a>
+                  <CopyButton value={queriedAddress} />
+                </FactRow>
               </div>
 
-              {/* Action Buttons */}
+              {/* Actions */}
               <div style={{ display: "flex", gap: "12px", marginTop: "28px", flexWrap: "wrap" }}>
-                <Link
-                  href={`/claim?v=${queriedAddress}`}
-                  className="btn-hero-action"
-                  style={{ marginTop: 0, textDecoration: "none" }}
-                >
-                  <span>GO TO HEIR PORTAL</span>
+                <Link href={`/claim?v=${queriedAddress}`} className="btn-hero-action" style={{ marginTop: 0 }}>
+                  <span>I&apos;M AN HEIR OF THIS VAULT</span>
                   <span className="arrow-icon" aria-hidden="true">→</span>
                 </Link>
-
-                <a
-                  href={`https://sepolia.worldscan.org/address/${queriedAddress}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-secondary"
-                  style={{ padding: "12px 24px", fontSize: "0.875rem", borderRadius: "0px", display: "inline-flex", alignItems: "center", gap: 8 }}
-                >
-                  <span>VIEW CONTRACT BYTECODE</span>
-                  <span>↗</span>
-                </a>
-
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchInput("");
-                    setQueriedAddress(null);
-                  }}
-                  className="btn-secondary"
-                  style={{ padding: "12px 24px", fontSize: "0.875rem", borderRadius: "0px" }}
+                  onClick={handleReset}
+                  className="btn-hero-action btn-hero-action--ghost"
+                  style={{ marginTop: 0 }}
                 >
-                  RESET SEARCH
+                  <span>NEW LOOKUP</span>
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Attribution note */}
-        <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: 24, letterSpacing: "0.04em" }}>
-          TELEMETRY INTERROGATED LIVE FROM WORLD CHAIN SEPOLIA (CHAIN ID 4801) · NO PROPRIETARY DATABASE INVOLVED
+        <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: 24 }}>
+          Status is read live from World Chain Sepolia.
         </p>
       </div>
     </div>

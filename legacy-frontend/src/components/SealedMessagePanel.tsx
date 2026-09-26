@@ -8,6 +8,9 @@ interface SealedMessagePanelProps {
   vaultAddress: `0x${string}`;
   ownerAddress: `0x${string}`;
   heirs: readonly `0x${string}`[];
+  /** Lowercased heir address → display name. */
+  heirNames?: Record<string, string>;
+  onGoToHeirs?: () => void;
 }
 
 interface InheritanceState {
@@ -19,7 +22,18 @@ interface InheritanceState {
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs }: SealedMessagePanelProps) {
+export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirNames = {}, onGoToHeirs }: SealedMessagePanelProps) {
+  const nameOf = (h: string) => heirNames[h.toLowerCase()] ?? short(h);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyPortalLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/claim?v=${vaultAddress}`);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1600);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
   const { signMessageAsync } = useSignMessage();
   const [selectedHeir, setSelectedHeir] = useState<`0x${string}` | null>(heirs[0] ?? null);
   const [state, setState] = useState<InheritanceState | null>(null);
@@ -62,7 +76,7 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs }: Sealed
   const handleSeal = async () => {
     if (!selectedHeir || !state?.heirPublicKey || !signMessageAsync) return;
     if (text.trim().length === 0) {
-      setFeedback({ text: "Enter a message to seal.", isError: true });
+      setFeedback({ text: "Write a message first.", isError: true });
       return;
     }
     try {
@@ -88,126 +102,98 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs }: Sealed
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to seal message");
 
-      setFeedback({ text: "Message sealed. Only this heir can decrypt it, and only after succession.", isError: false });
+      setFeedback({ text: `Sealed. Only ${nameOf(selectedHeir)} can open it, once the vault passes to them.`, isError: false });
       setText("");
       loadState(selectedHeir);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to seal message";
-      setFeedback({ text: msg.includes("User rejected") ? "Signature request rejected." : msg, isError: true });
+      setFeedback({ text: msg.includes("User rejected") ? "You declined the signature in your wallet." : msg, isError: true });
     } finally {
       setIsSealing(false);
     }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <span className="section-tag">[ SEALED LEGACY MESSAGE ]</span>
-        <h3 className="section-title" style={{ fontSize: "1.375rem", margin: "6px 0 8px" }}>
-          Encrypt a Message for an Heir
-        </h3>
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, maxWidth: 620 }}>
-          Write a private message — a passphrase, final words, instructions — sealed to a single heir&apos;s wallet.
-          You can write it but never read it back. The heir can decrypt it only after your vault enters succession.
-        </p>
+    <div className="panel-stack">
+      <div className="panel-head">
+        <div>
+          <h3 className="panel-title">Sealed message</h3>
+          <p className="panel-lead">
+            Leave a private note for one heir. Only they can open it, and only after the vault passes to them.
+          </p>
+        </div>
       </div>
 
       {heirs.length === 0 ? (
-        <div style={{ padding: "16px 20px", border: "1px solid var(--border-hairline)", background: "rgba(255,255,255,0.02)", fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-          Add an authorized heir first — sealed messages are addressed to a specific heir.
+        <div className="panel-empty">
+          <span>Add an heir first. Each message is sealed to one person.</span>
+          {onGoToHeirs && (
+            <button type="button" className="flow-btn flow-btn--ghost" onClick={onGoToHeirs}>
+              Go to heirs
+            </button>
+          )}
         </div>
       ) : (
         <>
-          {/* Heir selector */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label className="section-tag" style={{ margin: 0 }}>SELECT HEIR</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {heirs.map((h) => {
-                const active = h.toLowerCase() === selectedHeir?.toLowerCase();
-                return (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => setSelectedHeir(h)}
-                    className="font-data"
-                    style={{
-                      padding: "8px 14px",
-                      fontSize: "0.8125rem",
-                      cursor: "pointer",
-                      background: active ? "rgba(184,137,74,0.16)" : "transparent",
-                      color: active ? "var(--accent-brass)" : "var(--text-secondary)",
-                      border: `1px solid ${active ? "var(--accent-brass)" : "var(--border-hairline)"}`,
-                    }}
-                  >
-                    {short(h)}
-                  </button>
-                );
-              })}
+            <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>To</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }} role="group" aria-label="Choose heir">
+              {heirs.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  className="chip"
+                  aria-pressed={h.toLowerCase() === selectedHeir?.toLowerCase()}
+                  onClick={() => {
+                    setFeedback(null);
+                    setSelectedHeir(h);
+                  }}
+                  title={h}
+                >
+                  {nameOf(h)}
+                </button>
+              ))}
             </div>
           </div>
 
           {isLoading || !state ? (
-            <div className="skeleton-shimmer" style={{ width: "100%", height: 120 }} />
+            <div className="skeleton-shimmer" style={{ width: "100%", height: 140, borderRadius: 12 }} />
           ) : !state.enrolled ? (
-            <div style={{ padding: "16px 20px", border: "1px solid var(--status-amber)", background: "rgba(217,154,61,0.08)", fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6 }}>
-              <strong style={{ color: "var(--status-amber)" }}>Heir not enrolled yet.</strong> Heir {short(selectedHeir!)} must
-              open the Heir Portal and enroll their decryption key before you can seal a message to them. Once they enroll,
-              their key appears here automatically.
+            <div className="console-alert console-alert--warning">
+              <div className="console-alert-body">
+                <strong>{nameOf(selectedHeir!)} needs to set up their key first</strong>
+                <p>Ask them to open the heir portal and sign in once. You can write to them right after.</p>
+              </div>
+              <button type="button" className="flow-btn flow-btn--ghost" onClick={copyPortalLink}>
+                {linkCopied ? "Link copied" : "Copy portal link"}
+              </button>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: "0.75rem", color: "var(--status-green)", fontFamily: "var(--font-data)" }}>
-                ✓ Heir enrolled · encryption key on file
-                {state.hasSealed && state.sealedAt ? ` · last sealed ${new Date(state.sealedAt).toLocaleString()}` : ""}
-              </div>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Write the private message to seal for this heir…"
-                rows={5}
-                className="font-data"
-                style={{
-                  width: "100%",
-                  resize: "vertical",
-                  padding: "12px 16px",
-                  background: "#000000",
-                  border: "1px solid var(--border-hairline)",
-                  color: "#ffffff",
-                  fontSize: "0.875rem",
-                  lineHeight: 1.5,
-                }}
+                placeholder={`Write something only ${nameOf(selectedHeir!)} will read…`}
+                rows={6}
+                className="flow-input"
+                aria-label="Message"
+                style={{ resize: "vertical", lineHeight: 1.6 }}
               />
-              <button
-                type="button"
-                onClick={handleSeal}
-                disabled={isSealing || text.trim().length === 0}
-                className="btn-hero-action"
-                style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-              >
-                <span>{isSealing ? "SEALING…" : state.hasSealed ? "RE-SEAL MESSAGE" : "SEAL & STORE"}</span>
-                <span className="arrow-icon" aria-hidden="true">→</span>
-              </button>
-              {state.hasSealed && (
-                <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", margin: 0 }}>
-                  Re-sealing overwrites the previous message for this heir.
-                </p>
-              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                  {state.hasSealed && state.sealedAt
+                    ? `Saving replaces the message you sealed on ${new Date(state.sealedAt).toLocaleDateString()}.`
+                    : "You won't be able to read it again after sealing."}
+                </span>
+                <button type="button" onClick={handleSeal} disabled={isSealing || text.trim().length === 0} className="flow-btn">
+                  {isSealing ? "Sealing…" : state.hasSealed ? "Replace message" : "Seal message"}
+                </button>
+              </div>
             </div>
           )}
 
           {feedback && (
-            <div
-              style={{
-                padding: "12px 16px",
-                fontSize: "0.8125rem",
-                fontFamily: "var(--font-data)",
-                color: "#ffffff",
-                border: `1px solid ${feedback.isError ? "var(--status-red)" : "var(--status-green)"}`,
-                background: feedback.isError ? "rgba(193,80,63,0.12)" : "rgba(76,175,109,0.12)",
-              }}
-            >
-              {feedback.text}
-            </div>
+            <div className={`panel-note ${feedback.isError ? "panel-note--error" : "panel-note--success"}`}>{feedback.text}</div>
           )}
         </>
       )}

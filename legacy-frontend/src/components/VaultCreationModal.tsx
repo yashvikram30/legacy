@@ -5,40 +5,46 @@ import React, { useEffect, useRef, useState } from "react";
 interface VaultCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onDeploy: (vaultName: string) => void;
+  onDeploy: (vaultName: string, ownerName: string) => void;
+  /** Pre-fills "Your name" with what the owner used on a previous vault. */
+  defaultOwnerName?: string;
 }
 
 const MAX_NAME_LENGTH = 60;
 
 /**
- * Web2-style first step of vault creation: the owner gives the vault a
- * human-readable name before any wallet interaction. The name is metadata
- * persisted off-chain once the vault address is known — it never touches
+ * Web2-style first step of vault creation: the owner names the vault and
+ * themselves before any wallet interaction. Both names are metadata
+ * persisted off-chain once the vault address is known — they never touch
  * the deployment transaction.
  */
-export function VaultCreationModal({ isOpen, onClose, onDeploy }: VaultCreationModalProps) {
+export function VaultCreationModal({ isOpen, onClose, onDeploy, defaultOwnerName = "" }: VaultCreationModalProps) {
   const [name, setName] = useState("");
+  const [ownerName, setOwnerName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset field each time the modal opens
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset fields each time the modal opens
       setName("");
+      setOwnerName(defaultOwnerName);
       // Focus the field on open for an immediate, web2-form feel.
       const t = setTimeout(() => inputRef.current?.focus(), 60);
       return () => clearTimeout(t);
     }
-  }, [isOpen]);
+  }, [isOpen, defaultOwnerName]);
 
   if (!isOpen) return null;
 
   const trimmed = name.trim();
-  const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_NAME_LENGTH;
+  const trimmedOwner = ownerName.trim();
+  const isValid = (v: string) => v.length > 0 && v.length <= MAX_NAME_LENGTH;
+  const canSubmit = isValid(trimmed) && isValid(trimmedOwner);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onDeploy(trimmed);
+    onDeploy(trimmed, trimmedOwner);
   };
 
   return (
@@ -51,107 +57,57 @@ export function VaultCreationModal({ isOpen, onClose, onDeploy }: VaultCreationM
       <form
         onSubmit={handleSubmit}
         className="deployment-modal modal-surface-animate"
-        style={{ maxWidth: "480px" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-vault-title"
       >
-        {/* Header */}
-        <div
-          style={{
-            padding: "20px 24px 16px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-            background: "rgba(255, 255, 255, 0.02)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.6875rem",
-              color: "var(--accent-brass)",
-              fontFamily: "var(--font-data)",
-              letterSpacing: "0.08em",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }}
-          >
-            [ NEW VAULT ]
-          </div>
-          <h2
-            style={{
-              fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-              fontSize: "1.25rem",
-              color: "#ffffff",
-              letterSpacing: "0.04em",
-              marginTop: "4px",
-            }}
-          >
-            NAME YOUR SUCCESSION VAULT
+        <div className="flow-header">
+          <h2 id="new-vault-title" className="flow-title">
+            New vault
           </h2>
+          <p className="flow-sub">Your heirs will see these names, not wallet addresses.</p>
+          <button type="button" onClick={onClose} className="flow-close" aria-label="Close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.55, margin: 0 }}>
-            Give this vault a name you&apos;ll recognize — like{" "}
-            <span style={{ color: "var(--text-primary)" }}>&ldquo;Family Estate&rdquo;</span> or{" "}
-            <span style={{ color: "var(--text-primary)" }}>&ldquo;Cold Storage Legacy&rdquo;</span>. It&apos;s a
-            private label for your dashboard and is stored off-chain.
-          </p>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label
-              htmlFor="vault-name-input"
-              style={{
-                fontSize: "0.6875rem",
-                color: "var(--text-secondary)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                fontFamily: "var(--font-data)",
-              }}
-            >
-              Vault Name
-            </label>
+        <div className="flow-fields">
+          <label className="flow-field">
+            <span>Vault name</span>
             <input
-              id="vault-name-input"
               ref={inputRef}
               type="text"
-              className="input-instrument"
-              placeholder="e.g. Family Estate"
+              className="flow-input"
+              placeholder="Family Estate"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={MAX_NAME_LENGTH}
               autoComplete="off"
-              style={{ fontSize: "0.9375rem", borderRadius: 0, padding: "12px 16px", backgroundColor: "#000000" }}
             />
-            <span style={{ fontSize: "0.6875rem", color: "rgba(255, 255, 255, 0.4)", textAlign: "right" }}>
-              {trimmed.length}/{MAX_NAME_LENGTH}
-            </span>
-          </div>
+          </label>
+
+          <label className="flow-field">
+            <span>Your name</span>
+            <input
+              type="text"
+              className="flow-input"
+              placeholder="Maria Chen"
+              value={ownerName}
+              onChange={(e) => setOwnerName(e.target.value)}
+              maxLength={MAX_NAME_LENGTH}
+              autoComplete="name"
+            />
+          </label>
         </div>
 
-        {/* Footer */}
-        <div
-          style={{
-            padding: "16px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "10px",
-            background: "rgba(255, 255, 255, 0.015)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-secondary"
-            style={{ padding: "10px 18px", fontSize: "0.8125rem", borderRadius: 0 }}
-          >
+        <div className="flow-footer" style={{ justifyContent: "flex-end" }}>
+          <button type="button" onClick={onClose} className="flow-btn flow-btn--ghost">
             Cancel
           </button>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="btn-brass"
-            style={{ padding: "10px 22px", fontSize: "0.8125rem", borderRadius: 0, whiteSpace: "nowrap" }}
-          >
-            Deploy Vault →
+          <button type="submit" disabled={!canSubmit} className="flow-btn">
+            Create vault
           </button>
         </div>
       </form>

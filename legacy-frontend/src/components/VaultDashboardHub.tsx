@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getAbiItem } from "viem";
 import { useAccount, usePublicClient, useReadContracts } from "wagmi";
-import { VaultStatus } from "@/lib/constants";
+import { VaultStatus, VAULT_STATUS_COPY, shortAddress } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
-import { fetchVaultMetasByOwner } from "@/lib/vault-meta/client";
+import { fetchVaultMeta, fetchVaultMetasByOwner } from "@/lib/vault-meta/client";
 
 interface VaultDashboardHubProps {
   ownedVaults: readonly `0x${string}`[];
@@ -23,20 +23,16 @@ interface HeirVaultEntry {
   vault: `0x${string}`;
   status: VaultStatus;
   owner: `0x${string}`;
+  vaultName?: string;
+  ownerName?: string;
 }
 
 const heirAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "HeirAdded" });
 const guardianAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "GuardianAdded" });
 
-function statusLabel(status: VaultStatus | null) {
-  if (status === VaultStatus.Green) return { text: "GREEN", color: "var(--status-green)" };
-  if (status === VaultStatus.Amber) return { text: "AMBER", color: "var(--status-amber)" };
-  if (status === VaultStatus.Red) return { text: "RED", color: "var(--status-red)" };
-  return { text: "…", color: "var(--text-secondary)" };
-}
-
 function StatusDot({ status }: { status: VaultStatus | null }) {
-  const { text, color } = statusLabel(status);
+  const copy = status !== null ? VAULT_STATUS_COPY[status] : null;
+  const color = copy?.color ?? "var(--text-secondary)";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       <span
@@ -45,13 +41,11 @@ function StatusDot({ status }: { status: VaultStatus | null }) {
           height: 8,
           borderRadius: "50%",
           backgroundColor: color,
-          boxShadow: status !== null ? `0 0 6px ${color}` : "none",
+          boxShadow: copy ? `0 0 6px ${color}` : "none",
           flexShrink: 0,
         }}
       />
-      <span className="font-data" style={{ fontSize: "0.6875rem", fontWeight: 700, letterSpacing: "0.06em", color }}>
-        {text}
-      </span>
+      <span style={{ fontSize: "0.75rem", fontWeight: 600, color }}>{copy?.label ?? "Loading…"}</span>
     </span>
   );
 }
@@ -69,8 +63,7 @@ function VaultCard({
   vaultAddress,
   vaultName,
   status,
-  metaLabel,
-  metaValue,
+  detail,
   ctaLabel,
   onClick,
   urgent,
@@ -79,8 +72,8 @@ function VaultCard({
   vaultAddress: `0x${string}`;
   vaultName?: string;
   status: VaultStatus | null;
-  metaLabel: string;
-  metaValue: string;
+  /** One human line under the name, e.g. "From Maria Chen" or "2 heirs". */
+  detail: string;
   ctaLabel: string;
   onClick: () => void;
   urgent?: boolean;
@@ -95,8 +88,8 @@ function VaultCard({
         textAlign: "left",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
-        padding: "18px 20px",
+        gap: 12,
+        padding: "20px",
         backgroundColor: urgent ? "rgba(193, 80, 63, 0.06)" : "rgba(255, 255, 255, 0.02)",
         border: `1px solid ${urgent ? "var(--status-red)" : "rgba(255, 255, 255, 0.1)"}`,
         cursor: "pointer",
@@ -106,38 +99,33 @@ function VaultCard({
       }}
     >
       <StatusDot status={status} />
-      {vaultName ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div
-            style={{
-              fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-              fontSize: "1rem",
-              color: "#ffffff",
-              letterSpacing: "0.02em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {vaultName}
-          </div>
-          <div className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>
-            {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
+            fontSize: "1.0625rem",
+            color: vaultName ? "#ffffff" : "var(--text-secondary)",
+            letterSpacing: "0.02em",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={vaultAddress}
+        >
+          {vaultName ?? `Vault ${shortAddress(vaultAddress)}`}
         </div>
-      ) : (
-        <div className="font-data" style={{ fontSize: "0.8125rem", color: "#ffffff" }}>
-          {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
-        </div>
-      )}
-      <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-        {metaLabel}: <span style={{ color: "var(--text-primary)" }}>{metaValue}</span>
+        <div style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>{detail}</div>
       </div>
-      <div style={{ fontSize: "0.75rem", color: "var(--accent-brass)", fontWeight: 600, marginTop: 2 }}>
+      <div style={{ fontSize: "0.75rem", color: "var(--accent-brass)", fontWeight: 600 }}>
         {ctaLabel} →
       </div>
     </button>
   );
+}
+
+/** "From Maria Chen", falling back to a short owner address when unnamed. */
+function fromOwner(entry: HeirVaultEntry) {
+  return `From ${entry.ownerName ?? shortAddress(entry.owner)}`;
 }
 
 function CardSkeleton() {
@@ -223,13 +211,21 @@ export function VaultDashboardHub({
       const candidates = Array.from(new Set(logs.map((l) => l.address)));
 
       const results = await Promise.all(
-        candidates.map(async (vault) => {
+        candidates.map(async (vault): Promise<HeirVaultEntry | null> => {
           const [isHeirNow, statusNow, ownerNow] = await Promise.all([
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isHeir", args: [address] }),
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
           ]);
-          return isHeirNow ? { vault, status: Number(statusNow) as VaultStatus, owner: ownerNow as `0x${string}` } : null;
+          if (!isHeirNow) return null;
+          const meta = await fetchVaultMeta(vault);
+          return {
+            vault,
+            status: Number(statusNow) as VaultStatus,
+            owner: ownerNow as `0x${string}`,
+            vaultName: meta?.vaultName,
+            ownerName: meta?.ownerName,
+          };
         })
       );
 
@@ -265,13 +261,21 @@ export function VaultDashboardHub({
       const candidates = Array.from(new Set(logs.map((l) => l.address)));
 
       const results = await Promise.all(
-        candidates.map(async (vault) => {
+        candidates.map(async (vault): Promise<HeirVaultEntry | null> => {
           const [isGuardianNow, statusNow, ownerNow] = await Promise.all([
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isGuardian", args: [address] }),
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
             publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
           ]);
-          return isGuardianNow ? { vault, status: Number(statusNow) as VaultStatus, owner: ownerNow as `0x${string}` } : null;
+          if (!isGuardianNow) return null;
+          const meta = await fetchVaultMeta(vault);
+          return {
+            vault,
+            status: Number(statusNow) as VaultStatus,
+            owner: ownerNow as `0x${string}`,
+            vaultName: meta?.vaultName,
+            ownerName: meta?.ownerName,
+          };
         })
       );
 
@@ -296,10 +300,10 @@ export function VaultDashboardHub({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
         <div>
           <h1 className="section-title" style={{ fontSize: "1.625rem", marginBottom: "6px" }}>
-            VAULT DASHBOARD
+            YOUR VAULTS
           </h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", maxWidth: 520, lineHeight: 1.5 }}>
-            Vaults you own, and vaults where you&apos;re a designated beneficiary.
+            What you&apos;re leaving behind, and what&apos;s been left to you.
           </p>
         </div>
         <button
@@ -319,7 +323,7 @@ export function VaultDashboardHub({
       {/* ── Your Vaults ─────────────────────────────────────────── */}
       <section>
         <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
-          Your Vaults {hasOwned ? `(${ownedVaults.length})` : ""}
+          You own {hasOwned ? `(${ownedVaults.length})` : ""}
         </h2>
 
         {isLoadingOwned ? (
@@ -341,7 +345,7 @@ export function VaultDashboardHub({
             }}
           >
             <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0, lineHeight: 1.5, maxWidth: 420 }}>
-              You haven&apos;t created a succession vault yet. Deploy one to start protecting assets with automated World ID liveness checks.
+              You don&apos;t have a vault yet. Create one, add your heirs, and check in now and then. That&apos;s it.
             </p>
             <button
               type="button"
@@ -361,9 +365,14 @@ export function VaultDashboardHub({
                 vaultAddress={card.vault}
                 vaultName={card.name}
                 status={card.status}
-                metaLabel="Heirs"
-                metaValue={card.heirCount === null ? "…" : String(card.heirCount)}
-                ctaLabel="Manage"
+                detail={
+                  card.heirCount === null
+                    ? "Loading heirs…"
+                    : card.heirCount === 0
+                      ? "No heirs yet"
+                      : `${card.heirCount} heir${card.heirCount === 1 ? "" : "s"}`
+                }
+                ctaLabel="Open"
                 onClick={() => onManageVault(card.vault)}
                 style={cardStaggerStyle(i)}
               />
@@ -375,7 +384,7 @@ export function VaultDashboardHub({
       {/* ── Vaults You're a Beneficiary Of ──────────────────────── */}
       <section>
         <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
-          Vaults You&apos;re a Beneficiary Of {heirVaults.length > 0 ? `(${heirVaults.length})` : ""}
+          Left to you {heirVaults.length > 0 ? `(${heirVaults.length})` : ""}
         </h2>
 
         {isLoadingHeirVaults ? (
@@ -391,7 +400,7 @@ export function VaultDashboardHub({
             }}
           >
             <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0, lineHeight: 1.5 }}>
-              No succession vaults currently name you as a beneficiary.
+              Nobody has named you as an heir yet.
             </p>
           </div>
         ) : (
@@ -400,10 +409,10 @@ export function VaultDashboardHub({
               <VaultCard
                 key={entry.vault}
                 vaultAddress={entry.vault}
+                vaultName={entry.vaultName}
                 status={entry.status}
-                metaLabel="Owner"
-                metaValue={`${entry.owner.slice(0, 6)}…${entry.owner.slice(-4)}`}
-                ctaLabel="View & Claim"
+                detail={fromOwner(entry)}
+                ctaLabel={entry.status === VaultStatus.Red ? "Start claim" : "View"}
                 onClick={() => router.push(`/claim?v=${entry.vault}`)}
                 urgent={entry.status === VaultStatus.Red}
                 style={cardStaggerStyle(i)}
@@ -419,9 +428,9 @@ export function VaultDashboardHub({
         )}
 
         <p style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginTop: "10px" }}>
-          Know a vault address that isn&apos;t showing here?{" "}
+          Missing a vault?{" "}
           <Link href="/claim" style={{ color: "var(--accent-brass)" }}>
-            Look it up manually →
+            Look it up by address →
           </Link>
         </p>
       </section>
@@ -430,10 +439,10 @@ export function VaultDashboardHub({
       {(isLoadingGuardianVaults || guardianVaults.length > 0) && (
         <section>
           <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
-            Vaults You Safeguard {guardianVaults.length > 0 ? `(${guardianVaults.length})` : ""}
+            You&apos;re a guardian for {guardianVaults.length > 0 ? `(${guardianVaults.length})` : ""}
           </h2>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", marginTop: "-8px", marginBottom: "16px", lineHeight: 1.5, maxWidth: 560 }}>
-            Vaults where the owner trusts you to attest to their passing. If every guardian attests, the vault&apos;s inheritance timers are cut by 99%.
+            These owners trust you to confirm if they pass away. When every guardian confirms, their heirs can inherit almost immediately.
           </p>
 
           {isLoadingGuardianVaults ? (
@@ -446,10 +455,10 @@ export function VaultDashboardHub({
                 <VaultCard
                   key={entry.vault}
                   vaultAddress={entry.vault}
+                  vaultName={entry.vaultName}
                   status={entry.status}
-                  metaLabel="Owner"
-                  metaValue={`${entry.owner.slice(0, 6)}…${entry.owner.slice(-4)}`}
-                  ctaLabel="Review & Attest"
+                  detail={fromOwner(entry)}
+                  ctaLabel="Review"
                   onClick={() => router.push(`/claim?v=${entry.vault}`)}
                   urgent={entry.status === VaultStatus.Red}
                   style={cardStaggerStyle(i)}

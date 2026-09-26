@@ -12,6 +12,7 @@ export interface VaultMetaRecord {
   vaultAddress: string;
   ownerAddress: string;
   vaultName?: string;
+  ownerName?: string;
   heirNames: HeirNameEntry[];
   createdAt: number;
   updatedAt: number;
@@ -65,6 +66,7 @@ function docToRecord(doc: IVaultMeta): VaultMetaRecord {
     vaultAddress: doc.vaultAddress,
     ownerAddress: doc.ownerAddress,
     vaultName: doc.vaultName,
+    ownerName: doc.ownerName,
     heirNames: (doc.heirNames || []).map((h) => ({ address: h.address, name: h.name })),
     createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
@@ -108,22 +110,24 @@ export async function getVaultMetasByOwner(ownerAddress: string): Promise<VaultM
   return Array.from(memoryCache.values()).filter((r) => r.ownerAddress.toLowerCase() === owner);
 }
 
-/** Persist (or update) the display name the owner chose for a vault. */
-export async function setVaultName(
+/** Persist (or update) the vault's display name and/or the owner's display name. */
+export async function setVaultNames(
   vaultAddress: string,
   ownerAddress: string,
-  vaultName: string
+  names: { vaultName?: string; ownerName?: string }
 ): Promise<VaultMetaRecord> {
   const key = vaultAddress.toLowerCase();
   const owner = ownerAddress.toLowerCase();
-  const name = vaultName.trim();
+  const update: { ownerAddress: string; vaultName?: string; ownerName?: string } = { ownerAddress: owner };
+  if (names.vaultName !== undefined) update.vaultName = names.vaultName.trim();
+  if (names.ownerName !== undefined) update.ownerName = names.ownerName.trim();
 
   try {
     const conn = await connectToDatabase();
     if (conn) {
       const doc = await VaultMetaModel.findOneAndUpdate(
         { vaultAddress: key },
-        { $set: { vaultName: name, ownerAddress: owner } },
+        { $set: update },
         { new: true, upsert: true }
       );
       const rec = docToRecord(doc);
@@ -132,7 +136,7 @@ export async function setVaultName(
       return rec;
     }
   } catch (err) {
-    console.warn("[VaultMeta] Mongo setVaultName failed, falling back to file:", err);
+    console.warn("[VaultMeta] Mongo setVaultNames failed, falling back to file:", err);
   }
 
   loadFromFile();
@@ -140,7 +144,8 @@ export async function setVaultName(
   const rec: VaultMetaRecord = {
     vaultAddress: key,
     ownerAddress: owner,
-    vaultName: name,
+    vaultName: update.vaultName ?? existing?.vaultName,
+    ownerName: update.ownerName ?? existing?.ownerName,
     heirNames: existing?.heirNames ?? [],
     createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
@@ -196,6 +201,7 @@ export async function setHeirName(
     vaultAddress: key,
     ownerAddress: owner,
     vaultName: existing?.vaultName,
+    ownerName: existing?.ownerName,
     heirNames,
     createdAt: existing?.createdAt ?? Date.now(),
     updatedAt: Date.now(),

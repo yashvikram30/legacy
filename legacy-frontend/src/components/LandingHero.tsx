@@ -6,6 +6,88 @@ import { useAccount } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
 import { CONTRACT_ADDRESSES } from "@/lib/constants";
 
+const HERO_FACTS = [
+  { value: "1 SCAN", label: "World ID proves you're alive" },
+  { value: "0 CUSTODIANS", label: "Nobody else holds your assets" },
+  { value: "100% ON-CHAIN", label: "Rules enforced by smart contracts" },
+];
+
+const LIFECYCLE_STEPS = [
+  {
+    tone: "green",
+    name: "YOU'RE ACTIVE",
+    desc: "Check in with World ID on your own schedule. Everything stays yours.",
+    next: "Each check-in resets the clock",
+  },
+  {
+    tone: "amber",
+    name: "GRACE PERIOD",
+    desc: "Missed a check-in? You get a buffer before anything happens.",
+    next: "One check-in turns it green again",
+  },
+  {
+    tone: "red",
+    name: "HEIRS CAN CLAIM",
+    desc: "Your heirs can open a claim, but it waits out a veto window first.",
+    next: "Still alive? Check in to cancel it",
+  },
+] as const;
+
+const iconProps = {
+  width: 22,
+  height: 22,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.75,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+const SAFETY_FEATURES = [
+  {
+    title: "PRIVATE PROOF OF LIFE",
+    desc: "World ID confirms you're a real, living person without revealing who you are.",
+    icon: (
+      <svg {...iconProps}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8.5 12.5l2.5 2.5 4.5-5" />
+      </svg>
+    ),
+  },
+  {
+    title: "YOUR OWN VAULT",
+    desc: "Every vault is its own contract. Nothing is pooled and nothing can be upgraded.",
+    icon: (
+      <svg {...iconProps}>
+        <rect x="4" y="10" width="16" height="10" rx="1" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </svg>
+    ),
+  },
+  {
+    title: "BUILT-IN VETO",
+    desc: "Every claim waits out a window. One check-in from you blocks it.",
+    icon: (
+      <svg {...iconProps}>
+        <path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6l8-3z" />
+        <path d="M9.5 9.5l5 5M14.5 9.5l-5 5" />
+      </svg>
+    ),
+  },
+  {
+    title: "PICK WHO GETS WHAT",
+    desc: "Send each token, NFT, or ENS name to the specific heir you choose.",
+    icon: (
+      <svg {...iconProps}>
+        <path d="M12 20v-6M12 14L6 8M12 14l6-6" />
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+      </svg>
+    ),
+  },
+];
+
 interface LandingHeroProps {
   onOpenVault?: () => void;
   hasVaults?: boolean;
@@ -110,7 +192,7 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
 
         {/* Subtitle */}
         <p className="hero-subtitle animate-fade-up" style={{ animationDelay: "90ms" }}>
-          Self-sovereign digital inheritance on World Chain.
+          Your crypto goes to the people you choose, automatically, if you ever stop checking in.
         </p>
 
         {/* Action Buttons */}
@@ -125,205 +207,98 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
             id="hero-launch-vault-btn"
             style={{ marginTop: 0 }}
           >
-            <span>{isConnected ? (hasVaults ? "OPEN VAULT DASHBOARD" : "DEPLOY YOUR VAULT") : "LAUNCH VAULT"}</span>
+            <span>{isConnected ? (hasVaults ? "OPEN MY VAULT" : "CREATE MY VAULT") : "GET STARTED"}</span>
             <span className="arrow-icon" aria-hidden="true">→</span>
           </button>
 
-          <Link
-            href="/claim"
-            className="btn-hero-action"
-            style={{
-              marginTop: 0,
-              backgroundColor: "transparent",
-              color: "#ffffff",
-              borderColor: "rgba(255, 255, 255, 0.35)",
-            }}
-          >
-            <span>HEIR PORTAL</span>
+          <Link href="/claim" className="btn-hero-action btn-hero-action--ghost" style={{ marginTop: 0 }}>
+            <span>I&apos;M AN HEIR</span>
             <span className="arrow-icon" aria-hidden="true">↗</span>
           </Link>
         </div>
 
-        {/* Telemetry Strip */}
-        <div
-          className="hero-telemetry-strip animate-fade-up"
-          aria-label="Protocol Specifications"
+        {/* At-a-glance facts */}
+        <dl
+          className="hero-facts animate-fade-up"
+          aria-label="Legacy at a glance"
           style={{ animationDelay: "230ms" }}
         >
-          <div className="telemetry-cell">
-            <span className="telemetry-label">01 // LIVENESS VERIFICATION</span>
-            <span className="telemetry-value">WORLD ID ORB ZK-PROOF</span>
-          </div>
-          <div className="telemetry-cell">
-            <span className="telemetry-label">02 // TARGET NETWORK</span>
-            <span className="telemetry-value">WORLD CHAIN SEPOLIA (4801)</span>
-          </div>
-          <div className="telemetry-cell">
-            <span className="telemetry-label">03 // ARCHITECTURE</span>
-            <span className="telemetry-value">EIP-1167 MINIMAL PROXY</span>
-          </div>
-          <div className="telemetry-cell">
-            <span className="telemetry-label">04 // STATE ENGINE</span>
-            <span className="telemetry-value">GREEN · AMBER · RED</span>
-          </div>
-        </div>
+          {HERO_FACTS.map((fact) => (
+            <div key={fact.label} className="hero-fact">
+              <dt className="hero-fact-value">{fact.value}</dt>
+              <dd className="hero-fact-label">{fact.label}</dd>
+            </div>
+          ))}
+        </dl>
       </main>
 
-      {/* ── Section 1: Three-Tier State Lifecycle ────────────── */}
+      {/* ── Section 1: How it works ──────────────────────────── */}
       <section id="lifecycle" className="landing-section-wrap" aria-labelledby="lifecycle-title">
         <div className="landing-section-header">
-          <span className="section-tag">[ 01 // STATE ENGINE ]</span>
+          <span className="section-tag">[ 01 // HOW IT WORKS ]</span>
           <h2 id="lifecycle-title" className="section-title">
-            THREE-TIER AUTONOMOUS SUCCESSION
+            THREE STATES. ONE RULE.
           </h2>
-          <p className="section-lead">
-            Vault state transitions occur strictly on-chain, governed by deterministic heartbeats, configurable grace periods, and dispute-resistant contestable windows.
-          </p>
+          <p className="section-lead">Keep checking in and nothing changes. Stop, and your heirs take over.</p>
         </div>
 
-        <div className="lifecycle-grid">
-          {/* Card 1: Green */}
-          <RevealCard index={0} className="lifecycle-card lifecycle-card--green">
-            <div className="lifecycle-card-top">
-              <span className="lifecycle-badge" style={{ color: "var(--status-green)" }}>
-                <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
-                STATUS: GREEN
-              </span>
-              <span className="lifecycle-stage-num">STAGE 01</span>
-            </div>
-            <h3 className="lifecycle-name">ACTIVE LIVENESS</h3>
-            <p className="lifecycle-desc">
-              The vault owner conducts periodic cryptographic check-ins using World ID. The zero-knowledge proof verifies human vitality on-chain without revealing biometric or private data. Full asset custody remains exclusively with the owner.
-            </p>
-            <div className="lifecycle-mechanic">
-              <code>LegacyVault.checkIn(root, nullifierHash, proof)</code>
-              <div style={{ marginTop: "4px", color: "var(--text-secondary)", fontSize: "0.6875rem" }}>
-                Resets check-in timer to 100% capacity.
-              </div>
-            </div>
-          </RevealCard>
-
-          {/* Card 2: Amber */}
-          <RevealCard index={1} className="lifecycle-card lifecycle-card--amber">
-            <div className="lifecycle-card-top">
-              <span className="lifecycle-badge" style={{ color: "var(--status-amber)" }}>
-                <span className="network-dot" style={{ backgroundColor: "var(--status-amber)" }} />
-                STATUS: AMBER
-              </span>
-              <span className="lifecycle-stage-num">STAGE 02</span>
-            </div>
-            <h3 className="lifecycle-name">GRACE BUFFER</h3>
-            <p className="lifecycle-desc">
-              Triggered automatically when the check-in window expires without a heartbeat. The vault enters a protected buffer window (default 7 days). Assets remain frozen to heirs, and a single owner check-in instantly restores Green status.
-            </p>
-            <div className="lifecycle-mechanic">
-              <code>block.timestamp &gt; lastCheckIn + checkInInterval</code>
-              <div style={{ marginTop: "4px", color: "var(--text-secondary)", fontSize: "0.6875rem" }}>
-                Warning buffer active. Owner maintains total priority.
-              </div>
-            </div>
-          </RevealCard>
-
-          {/* Card 3: Red */}
-          <RevealCard index={2} className="lifecycle-card lifecycle-card--red">
-            <div className="lifecycle-card-top">
-              <span className="lifecycle-badge" style={{ color: "var(--status-red)" }}>
-                <span className="network-dot" style={{ backgroundColor: "var(--status-red)" }} />
-                STATUS: RED
-              </span>
-              <span className="lifecycle-stage-num">STAGE 03</span>
-            </div>
-            <h3 className="lifecycle-name">CONTESTABLE SUCCESSION</h3>
-            <p className="lifecycle-desc">
-              Once the grace period concludes, designated heirs can initiate succession claims. A 48-hour contestable window begins. If the owner is alive, they can instantly veto the claim before executors distribute assets.
-            </p>
-            <div className="lifecycle-mechanic">
-              <code>initiateClaim() &rarr; contestableWindow &rarr; finalizeClaim()</code>
-              <div style={{ marginTop: "4px", color: "var(--text-secondary)", fontSize: "0.6875rem" }}>
-                Contestable window protects against hostile claims.
-              </div>
-            </div>
-          </RevealCard>
-        </div>
+        <ol className="lifecycle-grid">
+          {LIFECYCLE_STEPS.map((step, i) => (
+            <li key={step.name} style={{ listStyle: "none", display: "flex" }}>
+              <RevealCard index={i} className={`lifecycle-card lifecycle-card--${step.tone}`}>
+                <div className="lifecycle-card-top">
+                  <span className="lifecycle-badge" style={{ color: `var(--status-${step.tone})` }}>
+                    <span className="network-dot" style={{ backgroundColor: `var(--status-${step.tone})` }} />
+                    {step.tone}
+                  </span>
+                  <span className="lifecycle-stage-num">0{i + 1}</span>
+                </div>
+                <h3 className="lifecycle-name">{step.name}</h3>
+                <p className="lifecycle-desc">{step.desc}</p>
+                <div className="lifecycle-mechanic">{step.next}</div>
+              </RevealCard>
+            </li>
+          ))}
+        </ol>
       </section>
 
-      {/* ── Section 2: Cryptographic Architecture ───────────── */}
+      {/* ── Section 2: Why it's safe ─────────────────────────── */}
       <section id="specs" className="landing-section-wrap" aria-labelledby="arch-title" style={{ paddingTop: 0 }}>
         <span id="architecture" style={{ display: "block", position: "relative", top: "-80px", visibility: "hidden" }} />
         <div className="landing-section-header">
-          <span className="section-tag">[ 02 // PROTOCOL SPECIFICATION ]</span>
+          <span className="section-tag">[ 02 // WHY IT&apos;S SAFE ]</span>
           <h2 id="arch-title" className="section-title">
-            BUILT FOR GENERATIONAL ASSURANCE
+            NO MIDDLEMEN. NO SURPRISES.
           </h2>
-          <p className="section-lead">
-            Legacy operates without centralized custodians, trusted legal oracles, or vulnerable multisigs. Everything is enforced purely by smart contracts on World Chain.
-          </p>
+          <p className="section-lead">Smart contracts on World Chain enforce every rule. No lawyers, custodians, or multisigs.</p>
         </div>
 
         <div className="arch-grid">
-          <RevealCard index={0} className="arch-card">
-            <span className="arch-card-num">01 // PROOF OF PERSONHOOD</span>
-            <h3 className="arch-card-title">World ID ZK-SNARK Verification</h3>
-            <p className="arch-card-desc">
-              Utilizes World ID&apos;s canonical on-chain router and Semaphore ZK-SNARK verifier. Proves unique human vitality without publishing any biometric identifier, address link, or identity leak on the public blockchain.
-            </p>
-          </RevealCard>
-
-          <RevealCard index={1} className="arch-card">
-            <span className="arch-card-num">02 // NON-CUSTODIAL ISOLATION</span>
-            <h3 className="arch-card-title">EIP-1167 Minimal Proxy Clones</h3>
-            <p className="arch-card-desc">
-              Each user deploys an independent, lightweight clone vault contract directly from the canonical factory. No pooled asset risk, no centralized upgrade backdoors, and 100% sovereign asset ownership.
-            </p>
-          </RevealCard>
-
-          <RevealCard index={2} className="arch-card">
-            <span className="arch-card-num">03 // DISPUTE-RESISTANT VETO</span>
-            <h3 className="arch-card-title">Contestable Window Protection</h3>
-            <p className="arch-card-desc">
-              Heirs cannot seize assets immediately upon grace expiry. The contestable window creates an infallible safety valve: any check-in by the living owner immediately revokes the claim and resets the instrument.
-            </p>
-          </RevealCard>
-
-          <RevealCard index={3} className="arch-card">
-            <span className="arch-card-num">04 // MODULAR ASSET DISTRIBUTION</span>
-            <h3 className="arch-card-title">Granular Allocation Adapters</h3>
-            <p className="arch-card-desc">
-              Assign native ETH, ERC-20 tokens, and NFTs to specific designated heirs. Custom vault executors enable arbitrary on-chain contract executions upon finalized claim settlement.
-            </p>
-          </RevealCard>
+          {SAFETY_FEATURES.map((feature, i) => (
+            <RevealCard key={feature.title} index={i} className="arch-card">
+              <span className="arch-card-icon" aria-hidden="true">
+                {feature.icon}
+              </span>
+              <h3 className="arch-card-title">{feature.title}</h3>
+              <p className="arch-card-desc">{feature.desc}</p>
+            </RevealCard>
+          ))}
         </div>
 
         {/* ── Call to Action Banner ── */}
         <div id="get-started" className="landing-cta-banner">
           <div className="cta-banner-content">
             <span className="section-tag">[ GET STARTED ]</span>
-            <h3 className="cta-banner-title">SECURE YOUR DIGITAL ESTATE</h3>
-            <p className="cta-banner-desc">
-              Deploy your non-custodial succession vault on World Chain Sepolia in under sixty seconds. Set your heartbeat frequency, assign your beneficiaries, and protect your legacy.
-            </p>
+            <h3 className="cta-banner-title">SET UP IN A MINUTE</h3>
+            <p className="cta-banner-desc">Pick a check-in schedule, add your heirs, and you&apos;re done.</p>
           </div>
           <div className="cta-banner-actions">
-            <button
-              type="button"
-              onClick={handlePrimaryAction}
-              className="btn-hero-action"
-              style={{ marginTop: 0 }}
-            >
-              <span>{isConnected ? "ENTER VAULT INSTRUMENT" : "CONNECT & LAUNCH VAULT"}</span>
+            <button type="button" onClick={handlePrimaryAction} className="btn-hero-action" style={{ marginTop: 0 }}>
+              <span>{isConnected ? (hasVaults ? "OPEN MY VAULT" : "CREATE MY VAULT") : "CONNECT WALLET"}</span>
               <span className="arrow-icon" aria-hidden="true">→</span>
             </button>
-            <Link
-              href="/claim"
-              className="btn-hero-action"
-              style={{
-                marginTop: 0,
-                backgroundColor: "transparent",
-                color: "#ffffff",
-                borderColor: "rgba(255, 255, 255, 0.35)",
-              }}
-            >
-              <span>HEIR CLAIM PORTAL</span>
+            <Link href="/claim" className="btn-hero-action btn-hero-action--ghost" style={{ marginTop: 0 }}>
+              <span>I&apos;M AN HEIR</span>
               <span className="arrow-icon" aria-hidden="true">↗</span>
             </Link>
           </div>

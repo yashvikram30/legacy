@@ -56,6 +56,43 @@ export enum VaultStatus {
   Red = 2,
 }
 
+/** Plain-language status copy, so users don't have to decode GREEN / AMBER / RED. */
+export const VAULT_STATUS_COPY: Record<VaultStatus, { label: string; color: string }> = {
+  [VaultStatus.Green]: { label: "Active", color: "var(--status-green)" },
+  [VaultStatus.Amber]: { label: "Check-in overdue", color: "var(--status-amber)" },
+  [VaultStatus.Red]: { label: "Claims open", color: "var(--status-red)" },
+};
+
+/** Short, human fallback for an unnamed address: 0x1234…abcd */
+export function shortAddress(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+const DURATION_UNITS: [number, string][] = [
+  [86400, "day"],
+  [3600, "hour"],
+  [60, "minute"],
+  [1, "second"],
+];
+
+/** Largest whole unit, pluralized: 45 → "45 seconds", 2592000 → "30 days". */
+export function humanDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  for (const [size, unit] of DURATION_UNITS) {
+    if (s >= size || size === 1) {
+      const n = Math.floor(s / size);
+      return `${n} ${unit}${n === 1 ? "" : "s"}`;
+    }
+  }
+  return "0 seconds";
+}
+
+/** "3 days ago" for a unix timestamp in seconds. */
+export function timeAgo(unixSeconds: number): string {
+  const elapsed = Date.now() / 1000 - unixSeconds;
+  return elapsed < 5 ? "just now" : `${humanDuration(elapsed)} ago`;
+}
+
 export enum ClaimStatus {
   NotInitiated = 0,
   Contestable = 1,

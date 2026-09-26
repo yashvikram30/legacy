@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { getAbiItem, isAddress } from "viem";
 import { useAccount, useReadContract, useWriteContract, usePublicClient, useChainId, useSwitchChain } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
-import { VaultStatus, ClaimStatus, CONTRACT_ADDRESSES, worldChainSepolia } from "@/lib/constants";
+import { VaultStatus, ClaimStatus, CONTRACT_ADDRESSES, worldChainSepolia, shortAddress } from "@/lib/constants";
+import { fetchVaultMeta, type VaultMetaRecord } from "@/lib/vault-meta/client";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { ClaimPortalSkeleton } from "@/components/Skeleton";
 import { useMounted } from "@/hooks/useMounted";
@@ -152,6 +153,21 @@ export default function HeirClaimPortal() {
   });
 
   const { writeContractAsync } = useWriteContract();
+
+  // Off-chain display names (vault + owner); falls back to addresses.
+  const [vaultMeta, setVaultMeta] = useState<VaultMetaRecord | null>(null);
+  useEffect(() => {
+    if (!vaultAddress) return;
+    let cancelled = false;
+    fetchVaultMeta(vaultAddress).then((meta) => {
+      if (!cancelled) setVaultMeta(meta);
+    });
+    return () => {
+      cancelled = true;
+      setVaultMeta(null);
+    };
+  }, [vaultAddress]);
+  const ownerDisplay = vaultMeta?.ownerName ?? (vaultOwnerRaw ? shortAddress(String(vaultOwnerRaw)) : "Unknown");
 
   // ── Heir's real on-chain allocations (assetId is a keccak256 hash,
   // never guessable — discovered via AssetAssigned logs, not hardcoded) ──
@@ -624,8 +640,21 @@ export default function HeirClaimPortal() {
                 flexWrap: "wrap",
               }}
             >
-              <span className="font-data" style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
-                Vault: <span style={{ color: "#ffffff" }}>{vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}</span>
+              <span style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
+                <span
+                  style={{
+                    fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
+                    fontSize: "1rem",
+                    color: "#ffffff",
+                    letterSpacing: "0.03em",
+                  }}
+                  title={vaultAddress}
+                >
+                  {vaultMeta?.vaultName ?? `Vault ${shortAddress(vaultAddress)}`}
+                </span>
+                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                  from <span style={{ color: "var(--text-primary)" }}>{ownerDisplay}</span>
+                </span>
               </span>
               <button
                 type="button"
@@ -766,10 +795,13 @@ export default function HeirClaimPortal() {
                 </div>
 
                 <div className="telemetry-cell" style={{ gridColumn: "span 3" }}>
-                  <span className="telemetry-label">02 // OWNER ADDRESS</span>
-                  <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                    {vaultOwnerRaw ? String(vaultOwnerRaw) : "Unknown"}
-                  </span>
+                  <span className="telemetry-label">02 // VAULT OWNER</span>
+                  <span className="telemetry-value">{ownerDisplay}</span>
+                  {vaultMeta?.ownerName && vaultOwnerRaw ? (
+                    <span className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>
+                      {String(vaultOwnerRaw)}
+                    </span>
+                  ) : null}
                 </div>
               </div>
 

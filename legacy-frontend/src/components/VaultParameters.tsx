@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { VaultStatus, PROTOCOL_FLOORS } from "@/lib/constants";
+import { VaultStatus, PROTOCOL_FLOORS, humanDuration } from "@/lib/constants";
 
 interface VaultParametersProps {
   checkInInterval: bigint;
@@ -16,6 +16,52 @@ interface VaultParametersProps {
   isLoading?: boolean;
 }
 
+const UNITS = [
+  { label: "seconds", seconds: 1 },
+  { label: "minutes", seconds: 60 },
+  { label: "hours", seconds: 3600 },
+  { label: "days", seconds: 86400 },
+] as const;
+
+type FieldKey = "interval" | "grace" | "veto";
+type Duration = { amount: string; unit: number };
+type Durations = Record<FieldKey, Duration>;
+
+const FIELDS: { key: FieldKey; label: string; hint: string; min: number }[] = [
+  { key: "interval", label: "Check in every", hint: "How often you prove you're alive.", min: PROTOCOL_FLOORS.minCheckInIntervalSeconds },
+  { key: "grace", label: "Grace period", hint: "Extra time after a missed check-in.", min: 0 },
+  { key: "veto", label: "Veto window", hint: "Time you have to cancel an heir's claim.", min: PROTOCOL_FLOORS.minContestableWindowSeconds },
+];
+
+const PRESETS: { id: string; label: string; seconds: Record<FieldKey, number> }[] = [
+  { id: "demo", label: "Quick demo", seconds: { interval: 45, grace: 15, veto: 45 } },
+  { id: "standard", label: "Standard", seconds: { interval: 86400 * 30, grace: 86400 * 7, veto: 3600 * 48 } },
+];
+
+/** Express seconds in the largest unit that divides evenly: 2592000 → 30 days. */
+function toDuration(totalSeconds: number): Duration {
+  for (let i = UNITS.length - 1; i > 0; i--) {
+    const size = UNITS[i].seconds;
+    if (totalSeconds > 0 && totalSeconds % size === 0) {
+      return { amount: String(totalSeconds / size), unit: size };
+    }
+  }
+  return { amount: String(totalSeconds), unit: 1 };
+}
+
+function toSeconds(d: Duration): number {
+  const n = Number(d.amount);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * d.unit) : NaN;
+}
+
+function fromChain(interval: bigint, grace: bigint, veto: bigint): Durations {
+  return {
+    interval: toDuration(Number(interval)),
+    grace: toDuration(Number(grace)),
+    veto: toDuration(Number(veto)),
+  };
+}
+
 export function VaultParameters({
   checkInInterval,
   gracePeriod,
@@ -24,17 +70,12 @@ export function VaultParameters({
   onUpdateParameters,
   isLoading = false,
 }: VaultParametersProps) {
-  const [intervalSec, setIntervalSec] = useState(Number(checkInInterval).toString());
-  const [graceSec, setGraceSec] = useState(Number(gracePeriod).toString());
-  const [contestableSec, setContestableSec] = useState(Number(contestableWindow).toString());
+  const [values, setValues] = useState<Durations>(() => fromChain(checkInInterval, gracePeriod, contestableWindow));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // Re-sync form fields whenever the on-chain values change (initial async
-  // load resolving after mount, or a refetch after a successful update) —
-  // otherwise the form is permanently stuck on whatever it first rendered
-  // with. Adjusted during render (React's recommended pattern for this),
-  // not in an effect, so it lands in the same paint instead of an extra one.
+  // Re-sync with on-chain values when they change (async load, or refetch
+  // after an update). Adjusted during render — React's recommended pattern.
   const [synced, setSynced] = useState({ checkInInterval, gracePeriod, contestableWindow });
   if (
     !isSubmitting &&
@@ -43,44 +84,44 @@ export function VaultParameters({
       synced.contestableWindow !== contestableWindow)
   ) {
     setSynced({ checkInInterval, gracePeriod, contestableWindow });
-    setIntervalSec(Number(checkInInterval).toString());
-    setGraceSec(Number(gracePeriod).toString());
-    setContestableSec(Number(contestableWindow).toString());
+    setValues(fromChain(checkInInterval, gracePeriod, contestableWindow));
   }
 
   const isGreen = vaultStatus === VaultStatus.Green;
+  const disabled = !isGreen || isSubmitting || isLoading;
 
-  const handleApplyRapidDemo = () => {
-    setIntervalSec("45");
-    setGraceSec("15");
-    setContestableSec("45");
-    setMessage({ text: "Applied 45-second testing preset (45s check-in / 15s grace / 45s contestable).", isError: false });
+  const seconds = {
+    interval: toSeconds(values.interval),
+    grace: toSeconds(values.grace),
+    veto: toSeconds(values.veto),
+  };
+  const allValid = FIELDS.every((f) => Number.isFinite(seconds[f.key]) && seconds[f.key] >= f.min);
+  const isDirty =
+    seconds.interval !== Number(checkInInterval) ||
+    seconds.grace !== Number(gracePeriod) ||
+    seconds.veto !== Number(contestableWindow);
+  const activePreset = PRESETS.find((p) => FIELDS.every((f) => p.seconds[f.key] === seconds[f.key]))?.id ?? "custom";
+
+  const setField = (key: FieldKey, patch: Partial<Duration>) => {
+    setMessage(null);
+    setValues((v) => ({ ...v, [key]: { ...v[key], ...patch } }));
   };
 
-  const handleApplyProductionPreset = () => {
-    setIntervalSec((86400 * 30).toString());
-    setGraceSec((86400 * 7).toString());
-    setContestableSec((3600 * 48).toString());
-    setMessage({ text: "Applied production preset (30 days check-in / 7 days grace / 48 hours contestable).", isError: false });
+  const applyPreset = (preset: (typeof PRESETS)[number]) => {
+    setMessage(null);
+    setValues({
+      interval: toDuration(preset.seconds.interval),
+      grace: toDuration(preset.seconds.grace),
+      veto: toDuration(preset.seconds.veto),
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const interval = BigInt(Math.max(1, parseInt(intervalSec, 10) || 45));
-    const grace = BigInt(Math.max(0, parseInt(graceSec, 10) || 15));
-    const contestable = BigInt(Math.max(1, parseInt(contestableSec, 10) || 45));
-
-    if (interval < BigInt(PROTOCOL_FLOORS.minCheckInIntervalSeconds)) {
+    const invalid = FIELDS.find((f) => !Number.isFinite(seconds[f.key]) || seconds[f.key] < f.min);
+    if (invalid) {
       setMessage({
-        text: `Check-in interval cannot be less than ${PROTOCOL_FLOORS.minCheckInIntervalSeconds} seconds (protocol floor).`,
-        isError: true,
-      });
-      return;
-    }
-
-    if (contestable < BigInt(PROTOCOL_FLOORS.minContestableWindowSeconds)) {
-      setMessage({
-        text: `Contestable window cannot be less than ${PROTOCOL_FLOORS.minContestableWindowSeconds} seconds (protocol floor).`,
+        text: invalid.min > 0 ? `${invalid.label} must be at least ${humanDuration(invalid.min)}.` : `Enter a valid ${invalid.label.toLowerCase()}.`,
         isError: true,
       });
       return;
@@ -89,10 +130,10 @@ export function VaultParameters({
     try {
       setIsSubmitting(true);
       setMessage(null);
-      await onUpdateParameters(interval, grace, contestable);
-      setMessage({ text: "Vault parameters updated successfully on World Chain.", isError: false });
+      await onUpdateParameters(BigInt(seconds.interval), BigInt(seconds.grace), BigInt(seconds.veto));
+      setMessage({ text: "Timing saved.", isError: false });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to update parameters";
+      const msg = err instanceof Error ? err.message : "Couldn't save timing.";
       setMessage({ text: msg, isError: true });
     } finally {
       setIsSubmitting(false);
@@ -100,186 +141,101 @@ export function VaultParameters({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+    <form onSubmit={handleSubmit} className="panel-stack">
+      <div className="panel-head">
         <div>
-          <h3
-            style={{
-              fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-              fontSize: "1.375rem",
-              fontWeight: 900,
-              letterSpacing: "0.06em",
-              color: "#ffffff",
-              textTransform: "uppercase",
-              margin: 0,
-            }}
-          >
-            Timelock Protocol Parameters
-          </h3>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "4px", lineHeight: 1.5 }}>
-            Configure autonomous heartbeat renewal cadence, safety grace duration, and heir contestation dispute window.
-          </p>
+          <h3 className="panel-title">Timing</h3>
+          <p className="panel-lead">How long each stage lasts before your heirs can inherit.</p>
         </div>
-
-        {/* Quick Presets or Locked Badge */}
         {isGreen ? (
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={handleApplyRapidDemo}
-              className="btn-secondary"
-              style={{ fontSize: "0.75rem", padding: "6px 12px", borderRadius: 0, borderColor: "var(--accent-brass)", color: "var(--accent-brass)" }}
-            >
-              ⚡ 45s Testing Preset
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyProductionPreset}
-              className="btn-secondary"
-              style={{ fontSize: "0.75rem", padding: "6px 12px", borderRadius: 0 }}
-            >
-              Standard 30d Preset
+          <div className="segmented" role="group" aria-label="Presets">
+            {PRESETS.map((p) => (
+              <button key={p.id} type="button" aria-pressed={activePreset === p.id} onClick={() => applyPreset(p)} disabled={disabled}>
+                {p.label}
+              </button>
+            ))}
+            <button type="button" aria-pressed={activePreset === "custom"} disabled tabIndex={-1}>
+              Custom
             </button>
           </div>
         ) : (
-          <span
-            style={{
-              fontSize: "0.75rem",
-              fontFamily: "var(--font-data)",
-              color: "var(--status-amber)",
-              border: "1px solid var(--status-amber)",
-              padding: "4px 10px",
-              borderRadius: 0,
-              textTransform: "uppercase",
-            }}
-          >
-            Parameters Locked (Vault Not Green)
+          <span className="lock-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            Check in to make changes
           </span>
         )}
       </div>
 
-      {!isGreen && (
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "rgba(184, 137, 74, 0.08)",
-            border: "1px solid rgba(184, 137, 74, 0.35)",
-            fontSize: "0.8125rem",
-            color: "var(--accent-brass)",
-            lineHeight: 1.5,
-          }}
-        >
-          🔒 <strong>Parameters Frozen:</strong> Protocol security rules prevent editing timelock intervals while the vault is Amber or Red to guarantee succession integrity. Perform a <strong>Check-In</strong> above to restore Green status and unlock parameter updates.
-        </div>
+      <div className="setting-list">
+        {FIELDS.map((f) => (
+          <div key={f.key} className="setting-row">
+            <div className="setting-label">
+              <strong>{f.label}</strong>
+              <span>{f.hint}</span>
+            </div>
+            <div className="setting-control">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                inputMode="decimal"
+                className="flow-input"
+                aria-label={`${f.label} amount`}
+                value={values[f.key].amount}
+                onChange={(e) => setField(f.key, { amount: e.target.value })}
+                disabled={disabled}
+                style={{ width: 96 }}
+              />
+              <select
+                className="flow-select"
+                aria-label={`${f.label} unit`}
+                value={values[f.key].unit}
+                onChange={(e) => setField(f.key, { unit: Number(e.target.value) })}
+                disabled={disabled}
+              >
+                {UNITS.map((u) => (
+                  <option key={u.label} value={u.seconds}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {allValid && (
+        <p className="panel-summary" style={{ margin: 0 }}>
+          If you stop checking in, your heirs can start a claim after <strong>{humanDuration(seconds.interval + seconds.grace)}</strong>.
+          You&apos;ll then have <strong>{humanDuration(seconds.veto)}</strong> to cancel it.
+        </p>
       )}
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "16px",
-          }}
-        >
-          <div style={{ padding: "16px", background: "rgba(255, 255, 255, 0.02)", border: "1px solid rgba(255, 255, 255, 0.12)" }}>
-            <label style={{ fontSize: "0.875rem", fontWeight: 600, color: "#EDEAE3", display: "block", marginBottom: "8px" }}>
-              Check-In Interval (Seconds)
-            </label>
-            <input
-              type="number"
-              min="5"
-              className="input-instrument font-data"
-              value={intervalSec}
-              onChange={(e) => setIntervalSec(e.target.value)}
-              disabled={!isGreen || isSubmitting || isLoading}
-              style={{ backgroundColor: "#000000", borderColor: "rgba(255, 255, 255, 0.2)", borderRadius: 0, padding: "10px 14px", width: "100%" }}
-            />
-            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "6px", display: "block" }}>
-              Protocol Floor: {PROTOCOL_FLOORS.minCheckInIntervalSeconds}s · Stays Green during this window
-            </span>
-          </div>
+      {message && <div className={`panel-note ${message.isError ? "panel-note--error" : "panel-note--success"}`}>{message.text}</div>}
 
-          <div style={{ padding: "16px", background: "rgba(255, 255, 255, 0.02)", border: "1px solid rgba(255, 255, 255, 0.12)" }}>
-            <label style={{ fontSize: "0.875rem", fontWeight: 600, color: "#EDEAE3", display: "block", marginBottom: "8px" }}>
-              Grace Duration (Seconds)
-            </label>
-            <input
-              type="number"
-              min="0"
-              className="input-instrument font-data"
-              value={graceSec}
-              onChange={(e) => setGraceSec(e.target.value)}
-              disabled={!isGreen || isSubmitting || isLoading}
-              style={{ backgroundColor: "#000000", borderColor: "rgba(255, 255, 255, 0.2)", borderRadius: 0, padding: "10px 14px", width: "100%" }}
-            />
-            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "6px", display: "block" }}>
-              Amber buffer window before Red transition
-            </span>
-          </div>
-
-          <div style={{ padding: "16px", background: "rgba(255, 255, 255, 0.02)", border: "1px solid rgba(255, 255, 255, 0.12)" }}>
-            <label style={{ fontSize: "0.875rem", fontWeight: 600, color: "#EDEAE3", display: "block", marginBottom: "8px" }}>
-              Contestable Window (Seconds)
-            </label>
-            <input
-              type="number"
-              min="5"
-              className="input-instrument font-data"
-              value={contestableSec}
-              onChange={(e) => setContestableSec(e.target.value)}
-              disabled={!isGreen || isSubmitting || isLoading}
-              style={{ backgroundColor: "#000000", borderColor: "rgba(255, 255, 255, 0.2)", borderRadius: 0, padding: "10px 14px", width: "100%" }}
-            />
-            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "6px", display: "block" }}>
-              Protocol Floor: {PROTOCOL_FLOORS.minContestableWindowSeconds}s · Countdown for heir finalization
-            </span>
-          </div>
-        </div>
-
-        {message && (
-          <div
-            style={{
-              padding: "12px 16px",
-              backgroundColor: message.isError ? "rgba(193, 80, 63, 0.15)" : "rgba(76, 175, 109, 0.15)",
-              border: `1px solid ${message.isError ? "var(--status-red)" : "var(--status-green)"}`,
-              borderRadius: 0,
-              fontSize: "0.8125rem",
-              color: "#ffffff",
-            }}
-          >
-            {message.text}
-          </div>
-        )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          {isGreen ? (
-            <button
-              type="submit"
-              disabled={isSubmitting || isLoading}
-              className="btn-brass"
-              style={{ padding: "12px 28px", fontSize: "0.8125rem", borderRadius: 0 }}
-            >
-              {isSubmitting ? "UPDATING PARAMETERS…" : "UPDATE PARAMETERS →"}
-            </button>
-          ) : (
+      {isGreen && (
+        <div className="panel-actions">
+          {isDirty && (
             <button
               type="button"
-              disabled={true}
-              className="btn-secondary"
-              style={{
-                padding: "12px 28px",
-                fontSize: "0.8125rem",
-                borderRadius: 0,
-                opacity: 0.5,
-                cursor: "not-allowed",
-                borderColor: "rgba(255, 255, 255, 0.2)",
+              className="flow-btn flow-btn--ghost"
+              onClick={() => {
+                setMessage(null);
+                setValues(fromChain(checkInInterval, gracePeriod, contestableWindow));
               }}
+              disabled={isSubmitting}
             >
-              🔒 LOCKED WHILE VAULT IS NOT GREEN
+              Reset
             </button>
           )}
+          <button type="submit" className="flow-btn" disabled={!isDirty || isSubmitting || isLoading}>
+            {isSubmitting ? "Saving…" : "Save changes"}
+          </button>
         </div>
-      </form>
-    </div>
+      )}
+    </form>
   );
 }

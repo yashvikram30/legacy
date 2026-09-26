@@ -72,7 +72,6 @@ export function Header() {
     borderLeft: "none",
     borderRight: "none",
     borderTop: "none",
-    display: "inline-flex",
     alignItems: "center",
   });
 
@@ -99,14 +98,11 @@ export function Header() {
           height: "100%",
           padding: "0 32px",
           margin: "0 auto",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
           gap: "20px",
         }}
       >
         {/* Brand */}
-        <div style={{ display: "flex", alignItems: "center", gap: "32px" }}>
+        <div className="header-brand">
           <Link
             href="/"
             className="brand-link"
@@ -126,64 +122,60 @@ export function Header() {
               LEGACY
             </span>
           </Link>
-
-          {/* Conditional Navigation Links */}
-          <nav
-            className="header-nav"
-            aria-label="Primary navigation"
-            style={{ display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap" }}
-          >
-            {isLanding ? (
-              /* Landing Page Navigation Links */
-              <>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection("lifecycle")}
-                  style={navItemStyle(false)}
-                  className="header-nav-btn"
-                >
-                  HOW IT WORKS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection("specs")}
-                  style={navItemStyle(false)}
-                  className="header-nav-btn"
-                >
-                  SPECS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection("get-started")}
-                  style={navItemStyle(false)}
-                  className="header-nav-btn"
-                >
-                  GET STARTED
-                </button>
-              </>
-            ) : (
-              /* Separate Pages Navigation Links */
-              <>
-                <Link
-                  href="/vault"
-                  style={navItemStyle(pathname.startsWith("/vault") || pathname === "/claim")}
-                  aria-current={pathname.startsWith("/vault") ? "page" : undefined}
-                  id="nav-link-vault"
-                >
-                  DASHBOARD
-                </Link>
-                <Link
-                  href="/lookup"
-                  style={navItemStyle(pathname === "/lookup")}
-                  aria-current={pathname === "/lookup" ? "page" : undefined}
-                  id="nav-link-lookup"
-                >
-                  LOOKUP
-                </Link>
-              </>
-            )}
-          </nav>
         </div>
+
+        {/* Conditional Navigation Links (centered column) */}
+        <nav className="header-nav" aria-label="Primary navigation">
+          {isLanding ? (
+            /* Landing Page Navigation Links */
+            <>
+              <button
+                type="button"
+                onClick={() => scrollToSection("lifecycle")}
+                style={navItemStyle(false)}
+                className="header-nav-btn"
+              >
+                HOW IT WORKS
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection("specs")}
+                style={navItemStyle(false)}
+                className="header-nav-btn"
+              >
+                WHY IT&apos;S SAFE
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection("get-started")}
+                style={navItemStyle(false)}
+                className="header-nav-btn"
+              >
+                GET STARTED
+              </button>
+            </>
+          ) : (
+            /* Separate Pages Navigation Links */
+            <>
+              <Link
+                href="/vault"
+                style={navItemStyle(pathname.startsWith("/vault") || pathname === "/claim")}
+                aria-current={pathname.startsWith("/vault") ? "page" : undefined}
+                id="nav-link-vault"
+              >
+                DASHBOARD
+              </Link>
+              <Link
+                href="/lookup"
+                style={navItemStyle(pathname === "/lookup")}
+                aria-current={pathname === "/lookup" ? "page" : undefined}
+                id="nav-link-lookup"
+              >
+                LOOKUP
+              </Link>
+            </>
+          )}
+        </nav>
 
         {/* Wallet & Contextual Actions Area */}
         <div className="header-wallet" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -197,7 +189,7 @@ export function Header() {
                 {isLanding && (
                   <Link
                     href="/vault"
-                    className="btn-secondary"
+                    className="btn-secondary header-launch-btn"
                     style={{
                       padding: "8px 16px",
                       fontSize: "0.75rem",

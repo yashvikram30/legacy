@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 
 export type DeploymentStage =
   | "idle"
@@ -22,437 +22,160 @@ interface VaultDeploymentModalProps {
   onClose: () => void;
 }
 
+// The pipeline has more internal stages than users need to see; each
+// visible step covers a group of them.
+const STEPS: { label: string; activeOn: DeploymentStage[] }[] = [
+  { label: "Confirm in your wallet", activeOn: ["requesting_signature"] },
+  { label: "Create vault on World Chain", activeOn: ["broadcasting", "confirming", "indexing"] },
+  { label: "Finish setup", activeOn: ["syncing"] },
+];
+
+const STAGE_ORDER: DeploymentStage[] = [
+  "requesting_signature",
+  "broadcasting",
+  "confirming",
+  "indexing",
+  "syncing",
+  "success",
+];
+
+function stepState(stepIndex: number, stage: DeploymentStage, failedAt: number): "done" | "active" | "failed" | "idle" {
+  if (stage === "error") {
+    if (stepIndex < failedAt) return "done";
+    return stepIndex === failedAt ? "failed" : "idle";
+  }
+  const current = STAGE_ORDER.indexOf(stage);
+  const firstOfStep = STAGE_ORDER.indexOf(STEPS[stepIndex].activeOn[0]);
+  const lastOfStep = STAGE_ORDER.indexOf(STEPS[stepIndex].activeOn[STEPS[stepIndex].activeOn.length - 1]);
+  if (current > lastOfStep) return "done";
+  if (current >= firstOfStep) return "active";
+  return "idle";
+}
+
+function StepIcon({ state }: { state: ReturnType<typeof stepState> }) {
+  if (state === "done") {
+    return (
+      <span className="flow-dot flow-dot--done" aria-hidden="true">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+  if (state === "failed") {
+    return (
+      <span className="flow-dot flow-dot--failed" aria-hidden="true">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round">
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </span>
+    );
+  }
+  return <span className={`flow-dot${state === "active" ? " flow-dot--active" : ""}`} aria-hidden="true" />;
+}
+
 export function VaultDeploymentModal({
   isOpen,
   stage,
   txHash,
-  vaultAddress,
   errorMessage,
   onRetry,
   onClose,
 }: VaultDeploymentModalProps) {
-  const [elapsedMs, setElapsedMs] = useState(0);
-
-  // Timer while active
-  useEffect(() => {
-    if (!isOpen || stage === "idle" || stage === "success" || stage === "error") {
-      return;
+  // Remember which step was running when an error hit, so the right one shows ✕.
+  const [failedAt, setFailedAt] = React.useState(0);
+  const [lastStage, setLastStage] = React.useState<DeploymentStage>(stage);
+  if (stage !== lastStage) {
+    if (stage === "error") {
+      const idx = STEPS.findIndex((s) => s.activeOn.includes(lastStage));
+      setFailedAt(idx === -1 ? 0 : idx);
     }
-
-    const start = Date.now();
-    const interval = setInterval(() => {
-      setElapsedMs(Date.now() - start);
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [isOpen, stage]);
+    setLastStage(stage);
+  }
 
   if (!isOpen) return null;
 
-  const seconds = stage === "idle" ? "0.0" : (elapsedMs / 1000).toFixed(1);
+  const isDone = stage === "success";
+  const isError = stage === "error";
 
-  const steps = [
-    {
-      id: 1,
-      name: "Wallet Confirmation",
-      desc: "Confirm vault creation in your connected wallet",
-      isComplete: ["broadcasting", "confirming", "indexing", "syncing", "success"].includes(stage),
-      isActive: stage === "requesting_signature",
-    },
-    {
-      id: 2,
-      name: "Network Confirmation",
-      desc: "Transaction confirming on World Chain (~1-2s)",
-      isComplete: ["indexing", "syncing", "success"].includes(stage),
-      isActive: ["broadcasting", "confirming"].includes(stage),
-    },
-    {
-      id: 3,
-      name: "Vault Setup",
-      desc: "Deploying your self-sovereign vault contract",
-      isComplete: ["syncing", "success"].includes(stage),
-      isActive: stage === "indexing",
-    },
-    {
-      id: 4,
-      name: "Vault Activation",
-      desc: "Configuring parameters and activating dashboard",
-      isComplete: stage === "success",
-      isActive: stage === "syncing",
-    },
-  ];
+  const title = isDone ? "Vault created" : isError ? "Couldn't create vault" : "Creating your vault";
+  const subtitle = isDone
+    ? "Next, add the people who'll inherit it."
+    : isError
+    ? null
+    : stage === "requesting_signature"
+    ? "Approve the request in your wallet."
+    : stage === "syncing"
+    ? "Almost there…"
+    : "This usually takes a few seconds.";
 
   return (
     <div
       className="deployment-overlay"
       onClick={(e) => {
-        // Only allow clicking backdrop to close if in error or success
-        if (e.target === e.currentTarget && (stage === "error" || stage === "success")) {
-          onClose();
-        }
+        if (e.target === e.currentTarget && (isError || isDone)) onClose();
       }}
     >
-      <div className="deployment-modal animate-fade-up">
-        {/* Header Strip */}
-        <div
-          style={{
-            padding: "20px 24px 16px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            background: "rgba(255, 255, 255, 0.02)",
-          }}
-        >
-          <div>
-            <div
-              style={{
-                fontSize: "0.6875rem",
-                color: "var(--accent-brass)",
-                fontFamily: "var(--font-data)",
-                letterSpacing: "0.08em",
-                fontWeight: 600,
-                textTransform: "uppercase",
-              }}
-            >
-              [ VAULT SETUP ]
-            </div>
-            <h2
-              style={{
-                fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-                fontSize: "1.25rem",
-                color: "#ffffff",
-                letterSpacing: "0.04em",
-                marginTop: "4px",
-              }}
-            >
-              {stage === "success"
-                ? "VAULT DEPLOYED SUCCESSFULLY"
-                : stage === "error"
-                ? "DEPLOYMENT FAILED"
-                : "INITIALIZING SUCCESSION VAULT"}
-            </h2>
-          </div>
-
-          {(stage === "error" || stage === "success") && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-secondary"
-              style={{ padding: "4px 10px", fontSize: "0.8125rem", borderRadius: 0 }}
-              aria-label="Close modal"
-            >
-              ✕
+      <div className="deployment-modal" role="dialog" aria-modal="true" aria-labelledby="deploy-title">
+        <div className="flow-header">
+          <h2 id="deploy-title" className="flow-title">
+            {title}
+          </h2>
+          {subtitle && <p className="flow-sub">{subtitle}</p>}
+          {isError && (
+            <p className="flow-error">{errorMessage || "Something went wrong. Please try again."}</p>
+          )}
+          {(isError || isDone) && (
+            <button type="button" onClick={onClose} className="flow-close" aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
             </button>
           )}
         </div>
 
-        {/* Dynamic Center Visualizer */}
-        <div
-          style={{
-            padding: "24px 24px 20px",
-            display: "flex",
-            alignItems: "center",
-            gap: "20px",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-            background: "rgba(0, 0, 0, 0.3)",
-          }}
-        >
-          {/* Animated Cryptographic Radar Ring */}
-          <div
-            style={{
-              position: "relative",
-              width: "68px",
-              height: "68px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            {stage === "success" ? (
-              <div
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  backgroundColor: "rgba(76, 175, 109, 0.15)",
-                  border: "2px solid var(--status-green)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--status-green)",
-                  fontSize: "1.5rem",
-                }}
-              >
-                ✓
-              </div>
-            ) : stage === "error" ? (
-              <div
-                style={{
-                  width: "56px",
-                  height: "56px",
-                  borderRadius: "50%",
-                  backgroundColor: "rgba(193, 80, 63, 0.15)",
-                  border: "2px solid var(--status-red)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--status-red)",
-                  fontSize: "1.375rem",
-                }}
-              >
-                ✕
-              </div>
-            ) : (
-              <>
-                {/* Outer spinning ring */}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    borderRadius: "50%",
-                    border: "2px dashed rgba(184, 137, 74, 0.5)",
-                    animation: "spin-cw 8s linear infinite",
-                  }}
-                />
-                {/* Middle counter-spinning ring */}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: "6px",
-                    borderRadius: "50%",
-                    border: "1px solid rgba(184, 137, 74, 0.2)",
-                    borderTopColor: "var(--accent-brass)",
-                    animation: "spin-ccw 2.5s linear infinite",
-                  }}
-                />
-                {/* Core pulsing dot */}
-                <div
-                  style={{
-                    width: "16px",
-                    height: "16px",
-                    borderRadius: "50%",
-                    backgroundColor: "var(--accent-brass)",
-                    boxShadow: "0 0 16px var(--accent-brass)",
-                    animation: "pulse-glow 1.5s infinite",
-                  }}
-                />
-              </>
-            )}
-          </div>
-
-          {/* Telemetry info */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span className="font-data" style={{ fontSize: "0.8125rem", color: "#EDEAE3", fontWeight: 600 }}>
-                {stage === "requesting_signature"
-                  ? "AWAITING WALLET SIGNATURE"
-                  : stage === "broadcasting" || stage === "confirming"
-                  ? "MINING ON WORLD CHAIN SEPOLIA"
-                  : stage === "indexing"
-                  ? "EXTRACTING MINIMAL PROXY"
-                  : stage === "syncing"
-                  ? "SYNCHRONIZING CONSOLE TELEMETRY"
-                  : stage === "success"
-                  ? "VAULT READY FOR CONFIGURATION"
-                  : "DEPLOYMENT INTERRUPTED"}
-              </span>
-              <span className="font-data" style={{ fontSize: "0.75rem", color: "var(--accent-brass)" }}>
-                {seconds}s
-              </span>
-            </div>
-
-            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.45 }}>
-              {stage === "requesting_signature" && "Please verify and approve the factory deployment transaction in your wallet."}
-              {(stage === "broadcasting" || stage === "confirming") && "Transaction broadcast to World Chain Sepolia. Waiting for receipt."}
-              {stage === "indexing" && "Receipt confirmed! Extracting cloned proxy contract address from receipt topics."}
-              {stage === "syncing" && "Reading initial timelock intervals and World ID router verifier binding."}
-              {stage === "success" && (
-                <span style={{ color: "var(--status-green)" }}>
-                  Succession clone active at {vaultAddress ? `${vaultAddress.slice(0, 10)}…${vaultAddress.slice(-8)}` : "selected address"}.
-                </span>
-              )}
-              {stage === "error" && (
-                <span style={{ color: "var(--status-red)" }}>
-                  {errorMessage || "The transaction was rejected or encountered an RPC error."}
-                </span>
-              )}
-            </div>
-
-            {/* Live Tx Hash if available */}
-            {txHash && (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                <span className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>
-                  TX: {txHash.slice(0, 12)}…{txHash.slice(-8)}
-                </span>
-                <a
-                  href={`https://sepolia.worldscan.org/tx/${txHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-data"
-                  style={{
-                    fontSize: "0.6875rem",
-                    color: "var(--accent-brass)",
-                    textDecoration: "underline",
-                  }}
-                >
-                  View on Worldscan ↗
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Step-by-Step Progress List */}
-        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "10px" }}>
-          {steps.map((s) => {
-            const stateClass = s.isComplete ? "completed" : s.isActive ? "active" : "";
+        <ol className="flow-steps">
+          {STEPS.map((step, i) => {
+            const state = stepState(i, stage, failedAt);
             return (
-              <div key={s.id} className={`deployment-step-item ${stateClass}`}>
-                {/* Step indicator */}
-                <div
-                  style={{
-                    width: "22px",
-                    height: "22px",
-                    borderRadius: "50%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "0.6875rem",
-                    fontFamily: "var(--font-data)",
-                    fontWeight: 700,
-                    flexShrink: 0,
-                    backgroundColor: s.isComplete
-                      ? "rgba(76, 175, 109, 0.2)"
-                      : s.isActive
-                      ? "var(--accent-brass)"
-                      : "rgba(255, 255, 255, 0.05)",
-                    color: s.isComplete
-                      ? "var(--status-green)"
-                      : s.isActive
-                      ? "#10151A"
-                      : "var(--text-secondary)",
-                    border: s.isComplete
-                      ? "1px solid var(--status-green)"
-                      : s.isActive
-                      ? "none"
-                      : "1px solid rgba(255, 255, 255, 0.1)",
-                  }}
-                >
-                  {s.isComplete ? "✓" : s.id}
-                </div>
-
-                {/* Step Content */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span
-                      style={{
-                        fontSize: "0.8125rem",
-                        fontWeight: s.isActive || s.isComplete ? 600 : 400,
-                        color: s.isComplete
-                          ? "#EDEAE3"
-                          : s.isActive
-                          ? "#ffffff"
-                          : "var(--text-secondary)",
-                      }}
-                    >
-                      {s.name}
-                    </span>
-                    {s.isActive && (
-                      <span
-                        className="font-data"
-                        style={{
-                          fontSize: "0.6875rem",
-                          color: "var(--accent-brass)",
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        IN PROGRESS…
-                      </span>
-                    )}
-                    {s.isComplete && (
-                      <span
-                        className="font-data"
-                        style={{
-                          fontSize: "0.6875rem",
-                          color: "var(--status-green)",
-                        }}
-                      >
-                        CONFIRMED
-                      </span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
-                    {s.desc}
-                  </span>
-                </div>
-              </div>
+              <li key={step.label} className={`flow-step flow-step--${state}`}>
+                <StepIcon state={state} />
+                <span>{step.label}</span>
+              </li>
             );
           })}
-        </div>
+        </ol>
 
-        {/* Footer Actions */}
-        <div
-          style={{
-            padding: "16px 24px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "rgba(255, 255, 255, 0.015)",
-          }}
-        >
-          <div className="font-data" style={{ fontSize: "0.6875rem", color: "rgba(255, 255, 255, 0.4)" }}>
-            CHAIN 4801 · EIP-1167 MINIMAL PROXY
-          </div>
+        <div className="flow-footer">
+          {txHash ? (
+            <a
+              href={`https://sepolia.worldscan.org/tx/${txHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flow-link"
+            >
+              View transaction ↗
+            </a>
+          ) : (
+            <span />
+          )}
 
-          {stage === "error" ? (
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn-secondary"
-                style={{ padding: "8px 16px", fontSize: "0.8125rem", borderRadius: 0 }}
-              >
-                Dismiss
+          {isError ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={onClose} className="flow-btn flow-btn--ghost">
+                Close
               </button>
               {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="btn-brass"
-                  style={{ padding: "8px 18px", fontSize: "0.8125rem", borderRadius: 0 }}
-                >
-                  Retry Deployment
+                <button type="button" onClick={onRetry} className="flow-btn">
+                  Try again
                 </button>
               )}
             </div>
-          ) : stage === "success" ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-brass"
-              style={{ padding: "8px 24px", fontSize: "0.8125rem", borderRadius: 0 }}
-            >
-              Open Succession Console →
+          ) : isDone ? (
+            <button type="button" onClick={onClose} className="flow-btn">
+              Open vault →
             </button>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--accent-brass)",
-                  animation: "pulse-glow 1.5s infinite",
-                }}
-              />
-              <span className="font-data" style={{ fontSize: "0.75rem", color: "var(--accent-brass)" }}>
-                DEPLOYING CLONE…
-              </span>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -9,12 +9,10 @@ import {
   VaultStatus,
   worldChainSepolia,
 } from "@/lib/constants";
-import { BaseError, ContractFunctionRevertedError } from "viem";
+import { BaseError, ContractFunctionRevertedError, getAddress, isAddress, isAddressEqual } from "viem";
 import { LegacyVaultFactoryABI, LegacyVaultABI, WorldIDRevertErrorsABI } from "@/lib/contracts/abis";
 import { VaultDashboardHub } from "@/components/VaultDashboardHub";
-import { VaultConfigRail } from "@/components/VaultConfigRail";
 import { LivenessPanel } from "@/components/LivenessPanel";
-import { PipelineVisualizer, type PipelineStage } from "@/components/PipelineVisualizer";
 import { SealedMessagePanel } from "@/components/SealedMessagePanel";
 import { ActivityLog } from "@/components/ActivityLog";
 import { CheckInModal } from "@/components/CheckInModal";
@@ -32,28 +30,17 @@ import {
   DeploymentStage,
 } from "@/components/VaultDeploymentModal";
 import { VaultCreationModal } from "@/components/VaultCreationModal";
+import { VaultIdentityBar } from "@/components/VaultIdentityBar";
 import {
   fetchVaultMeta,
-  saveVaultName,
+  saveVaultNames,
+  fetchVaultMetasByOwner,
   saveHeirName,
   removeHeirName as removeHeirNameMeta,
   heirNameMap,
   type VaultMetaRecord,
 } from "@/lib/vault-meta/client";
 import { useMounted } from "@/hooks/useMounted";
-
-const LIFECYCLE_STAGES: PipelineStage[] = [
-  { key: "liveness", label: "Active Liveness", hint: "You're checking in", color: "var(--status-green)" },
-  { key: "grace", label: "Grace Period", hint: "Cadence missed", color: "var(--status-amber)" },
-  { key: "contestation", label: "Heir Contestation", hint: "Claims unlock", color: "var(--status-red)" },
-  { key: "distribution", label: "Asset Distribution", hint: "Transfers execute", color: "var(--status-green)" },
-];
-
-function vaultStageIndex(status: VaultStatus): number {
-  if (status === VaultStatus.Amber) return 1;
-  if (status === VaultStatus.Red) return 2;
-  return 0;
-}
 
 // LegacyVault ABI plus the World ID errors that bubble up through
 // registerLiveness / checkIn, so simulated reverts decode to a named error.
@@ -90,6 +77,9 @@ async function assertLivenessCallSucceeds(
   }
 }
 
+const VAULT_TABS = ["heirs", "guardians", "assets", "parameters", "activity", "watchdog", "message"] as const;
+type VaultTab = (typeof VAULT_TABS)[number];
+
 export default function VaultDashboardPage() {
   const mounted = useMounted();
   const { address, isConnected, isConnecting, isReconnecting } = useAccount();
@@ -106,7 +96,7 @@ export default function VaultDashboardPage() {
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
   const [orchestratedMessage, setOrchestratedMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"heirs" | "guardians" | "assets" | "parameters" | "activity" | "watchdog" | "message">("heirs");
+  const [activeTab, setActiveTab] = useState<VaultTab>("heirs");
   const [assetList, setAssetList] = useState<AssetRecord[]>([]);
 
   // Deployment state
@@ -119,15 +109,36 @@ export default function VaultDashboardPage() {
   // Web2 naming flow: the "name your vault" step precedes deployment, and the
   // chosen name is persisted off-chain once the vault address is known.
   const [isNamingVault, setIsNamingVault] = useState(false);
-  const [pendingVaultName, setPendingVaultName] = useState<string>("");
+  const [pendingNames, setPendingNames] = useState<{ vaultName: string; ownerName: string } | null>(null);
+  // Name the owner used on any earlier vault — pre-fills "Your name" next time.
+  const [knownOwnerName, setKnownOwnerName] = useState<string>("");
   const [vaultMeta, setVaultMeta] = useState<VaultMetaRecord | null>(null);
+
+  // The open vault lives in the URL (?v=0x…) so refresh/back/share keep it.
+  const syncVaultToUrl = (vaultAddr: `0x${string}` | null) => {
+    const url = new URL(window.location.href);
+    if (vaultAddr) url.searchParams.set("v", vaultAddr);
+    else url.searchParams.delete("v");
+    window.history.replaceState(null, "", url);
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("v");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the open vault from the URL on mount
+    if (v && isAddress(v)) setSelectedVaultState(getAddress(v));
+    const tab = params.get("tab");
+    if (tab && (VAULT_TABS as readonly string[]).includes(tab)) setActiveTab(tab as VaultTab);
+  }, []);
 
   const handleSelectVault = (vaultAddr: `0x${string}`) => {
     setSelectedVaultState(vaultAddr);
+    syncVaultToUrl(vaultAddr);
   };
 
   const handleBackToDashboard = () => {
     setSelectedVaultState(null);
+    syncVaultToUrl(null);
   };
 
   // ── Contract reads ───────────────────────────────────────────────
@@ -139,8 +150,10 @@ export default function VaultDashboardPage() {
     query: { enabled: Boolean(address) },
   });
 
+  // Case-insensitive: getVaults returns checksummed addresses, while addresses
+  // from logs/URLs may be lowercase.
   const selectedVault =
-    selectedVaultState && userVaults?.includes(selectedVaultState) ? selectedVaultState : null;
+    (selectedVaultState && userVaults?.find((v) => isAddressEqual(v, selectedVaultState))) || null;
 
   const { data: rawStatus, isLoading: isStatusLoading, refetch: refetchStatus } = useReadContract({
     address: selectedVault ?? undefined,
@@ -241,6 +254,7 @@ export default function VaultDashboardPage() {
   const heirs = (rawHeirs as readonly `0x${string}`[]) || [];
   const heirNames = heirNameMap(vaultMeta);
   const vaultName = vaultMeta?.vaultName;
+  const ownerName = vaultMeta?.ownerName;
   const guardians = (rawGuardians as readonly `0x${string}`[]) || [];
   const deathAttestationCount = deathAttestationCountRaw !== undefined ? Number(deathAttestationCountRaw) : 0;
   const deathConfirmed = Boolean(deathConfirmedRaw);
@@ -261,6 +275,28 @@ export default function VaultDashboardPage() {
     }
     loadVaultMeta(selectedVault);
   }, [selectedVault, loadVaultMeta]);
+
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    fetchVaultMetasByOwner(address).then((metas) => {
+      const known = metas.find((m) => m.ownerName)?.ownerName;
+      if (!cancelled && known) setKnownOwnerName(known);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address]);
+
+  const handleSaveNames = async (names: { vaultName: string; ownerName: string }) => {
+    if (!selectedVault || !address) return false;
+    const ok = await saveVaultNames(selectedVault, address, names);
+    if (ok) {
+      setKnownOwnerName(names.ownerName);
+      await loadVaultMeta(selectedVault);
+    }
+    return ok;
+  };
 
   const refetchAll = useCallback(() => {
     refetchStatus();
@@ -716,8 +752,12 @@ export default function VaultDashboardPage() {
     }
   };
 
-  const handleCreateVault = async () => {
+  // `names` is passed explicitly on first deploy: reading `pendingNames` state
+  // right after setting it would see the previous render's value. Retries
+  // (no argument) fall back to the state, which has settled by then.
+  const handleCreateVault = async (names?: { vaultName: string; ownerName: string }) => {
     if (!publicClient) throw new Error("Public client unavailable");
+    const namesToSave = names ?? pendingNames;
     try {
       setIsCreatingVault(true);
       setDeployErrorMessage(null);
@@ -758,10 +798,19 @@ export default function VaultDashboardPage() {
       );
       let newVaultAddr: `0x${string}` | null = null;
       if (vaultCreatedLog?.topics[2]) {
-        newVaultAddr = `0x${vaultCreatedLog.topics[2].slice(26)}` as `0x${string}`;
+        newVaultAddr = getAddress(`0x${vaultCreatedLog.topics[2].slice(26)}`);
       }
       setDeployStage("syncing");
-      const { data: updatedVaults } = await refetchVaults();
+      // The RPC gateway is load-balanced, so a read right after the receipt can
+      // hit a node that hasn't seen this block yet. Poll until the new vault
+      // appears in getVaults (~10s max) so the dashboard can open it.
+      let { data: updatedVaults } = await refetchVaults();
+      for (let attempt = 0; newVaultAddr && attempt < 10; attempt++) {
+        const target = newVaultAddr;
+        if (updatedVaults?.some((v) => isAddressEqual(v, target))) break;
+        await new Promise((r) => setTimeout(r, 1000));
+        ({ data: updatedVaults } = await refetchVaults());
+      }
       let resolvedVault: `0x${string}` | null = null;
       if (newVaultAddr) {
         resolvedVault = newVaultAddr;
@@ -773,9 +822,10 @@ export default function VaultDashboardPage() {
         setDeployedVaultAddr(fallbackVault);
         handleSelectVault(fallbackVault);
       }
-      // Persist the name the owner gave this vault off-chain (best-effort).
-      if (resolvedVault && address && pendingVaultName.trim()) {
-        await saveVaultName(resolvedVault, address, pendingVaultName.trim());
+      // Persist the vault + owner names off-chain (best-effort).
+      if (resolvedVault && address && namesToSave) {
+        await saveVaultNames(resolvedVault, address, namesToSave);
+        setKnownOwnerName(namesToSave.ownerName);
         await loadVaultMeta(resolvedVault);
       }
       refetchAll();
@@ -788,9 +838,9 @@ export default function VaultDashboardPage() {
       console.error("❌ [Vault] createVault error details:", err);
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("rejected") || msg.includes("4001") || msg.includes("User denied") || msg.includes("denied")) {
-        setDeployErrorMessage("Creation authorization was rejected in wallet.");
+        setDeployErrorMessage("You declined the request in your wallet.");
       } else {
-        setDeployErrorMessage(msg);
+        setDeployErrorMessage(err instanceof BaseError ? err.shortMessage : msg);
       }
       setDeployStage("error");
     }
@@ -807,10 +857,11 @@ export default function VaultDashboardPage() {
     setIsNamingVault(true);
   };
 
-  const handleConfirmVaultName = (name: string) => {
-    setPendingVaultName(name);
+  const handleConfirmVaultName = (vaultName: string, ownerName: string) => {
+    const names = { vaultName, ownerName };
+    setPendingNames(names);
     setIsNamingVault(false);
-    handleCreateVault();
+    handleCreateVault(names);
   };
 
   // ── Safe SSR & Mounting State ─────────────────────────────────────
@@ -899,7 +950,7 @@ export default function VaultDashboardPage() {
 
   // ── Connected State ───────────────────────────────────────────────
   return (
-    <div className="landing-canvas" style={{ minHeight: "calc(100vh - var(--header-height, 64px))", padding: "32px 24px 96px" }}>
+    <div className="landing-canvas vault-console" style={{ minHeight: "calc(100vh - var(--header-height, 64px))", padding: "32px 24px 96px" }}>
       <div style={{ maxWidth: "1600px", margin: "0 auto", width: "100%" }}>
         {isWrongChain && (
           <div
@@ -948,251 +999,93 @@ export default function VaultDashboardPage() {
             />
           </div>
         ) : (
-        <div className="vault-dashboard-wrapper">
-          {/* Main Content Area (flex: 1) */}
-          <div className="vault-dashboard-main">
-              <>
-                {/* Slim context bar: replaces the old vault-switcher sidebar,
-                    which was redundant now that the dashboard hub owns vault
-                    switching/creation. Just orientation + a way back. */}
-                <div
-                  style={{
-                    padding: "14px 32px",
-                    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "12px",
-                    flexWrap: "wrap",
-                    background: "rgba(255, 255, 255, 0.015)",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={handleBackToDashboard}
-                    className="btn-secondary"
-                    style={{ padding: "6px 12px", fontSize: "0.75rem", borderRadius: 0, gap: "6px" }}
-                  >
-                    <span aria-hidden="true">←</span> All Vaults
-                  </button>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                    {vaultName ? (
-                      <>
-                        <span
-                          style={{
-                            fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
-                            fontSize: "0.9375rem",
-                            color: "#ffffff",
-                            letterSpacing: "0.03em",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            maxWidth: "40vw",
-                          }}
-                        >
-                          {vaultName}
-                        </span>
-                        <span className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)", opacity: 0.7 }}>
-                          {selectedVault.slice(0, 6)}…{selectedVault.slice(-4)}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
-                        {selectedVault.slice(0, 10)}…{selectedVault.slice(-6)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+        <div className="vault-console-layout">
+                {/* Identity: vault name + owner lead; the contract address is secondary */}
+                <VaultIdentityBar
+                  vaultAddress={selectedVault}
+                  vaultName={vaultName}
+                  ownerName={ownerName}
+                  onBack={handleBackToDashboard}
+                  onSaveNames={handleSaveNames}
+                />
 
-                {/* Orchestrated message banner */}
                 {orchestratedMessage && (
-                  <div
-                    className="animate-banner-enter"
-                    role="status"
-                    style={{
-                      backgroundColor: "rgba(76, 175, 109, 0.12)",
-                      borderBottom: "1px solid var(--status-green)",
-                      padding: "14px 32px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      color: "var(--status-green)",
-                      fontFamily: "var(--font-display)",
-                      fontSize: "0.9375rem",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
-                      <span>{orchestratedMessage}</span>
-                    </div>
+                  <div className="console-alert console-alert--success animate-banner-enter" role="status">
+                    <p className="console-alert-body">{orchestratedMessage}</p>
                     <button
                       type="button"
                       onClick={() => setOrchestratedMessage(null)}
                       aria-label="Dismiss"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "var(--status-green)",
-                        cursor: "pointer",
-                        fontSize: "1rem",
-                        lineHeight: 1,
-                        padding: "2px 4px",
-                        opacity: 0.7,
-                      }}
+                      className="flow-close console-alert-dismiss"
                     >
-                      ×
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
                 )}
 
-                {/* Legacy Verifier Banner */}
+                {deathConfirmed && (
+                  <div className="console-alert console-alert--danger" role="alert">
+                    <div className="console-alert-body">
+                      <strong>Your guardians reported your death</strong>
+                      <p>
+                        {guardians.length === 1 ? "Your guardian" : `All ${guardians.length} guardians`} confirmed it, so heirs can
+                        inherit almost immediately. If you&apos;re alive, check in to undo this.
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setIsCheckInModalOpen(true)} className="flow-btn">
+                      Check in
+                    </button>
+                  </div>
+                )}
+
                 {vaultVerifier && (vaultVerifier as string).toLowerCase() !== CONTRACT_ADDRESSES.verifier.toLowerCase() && (
-                  <div
-                    style={{
-                      backgroundColor: "rgba(230, 162, 60, 0.08)",
-                      borderBottom: "1px solid rgba(230, 162, 60, 0.3)",
-                      padding: "12px 32px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                      fontSize: "0.8125rem",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "10px", color: "var(--text-secondary)", lineHeight: 1.45 }}>
-                      <span style={{ color: "var(--accent-brass)", fontWeight: 800, fontSize: "0.75rem", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
-                        [ VERIFIER MISMATCH ]
-                      </span>
-                      <span>
-                        Vault <code className="font-data" style={{ color: "var(--text-primary)" }}>{selectedVault.slice(0, 8)}...</code> is bound to the production WorldIDRouter verifier. Deploy a testnet vault to test on World Chain Sepolia.
-                      </span>
+                  <div className="console-alert console-alert--warning">
+                    <div className="console-alert-body">
+                      <strong>This vault can&apos;t check in on testnet</strong>
+                      <p>It uses the production World ID verifier. Create a new vault to test.</p>
                     </div>
                     <button
                       type="button"
                       onClick={openVaultCreation}
                       disabled={isCreatingVault}
-                      className="btn-brass"
-                      style={{ fontSize: "0.75rem", padding: "6px 14px", borderRadius: 0, whiteSpace: "nowrap" }}
+                      className="flow-btn flow-btn--ghost"
                     >
-                      {isCreatingVault ? "Deploying…" : "+ Deploy Testnet Vault"}
+                      {isCreatingVault ? "Creating…" : "Create new vault"}
                     </button>
                   </div>
                 )}
 
-                {/* Guardian death-confirmation banner: unanimous attestation
-                    has collapsed this vault's timelocks by 99%. */}
-                {deathConfirmed && (
-                  <div
-                    style={{
-                      backgroundColor: "rgba(193, 80, 63, 0.15)",
-                      borderBottom: "1px solid var(--status-red)",
-                      padding: "14px 32px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span className="network-dot" style={{ backgroundColor: "var(--status-red)" }} />
-                      <span style={{ color: "var(--status-red)", fontWeight: 800, fontSize: "0.8125rem", letterSpacing: "0.04em" }}>
-                        [ GUARDIANS CONFIRMED DEATH ]
-                      </span>
-                      <span style={{ color: "#EDEAE3", fontSize: "0.875rem" }}>
-                        All {guardians.length} guardian{guardians.length === 1 ? "" : "s"} attested. Timelocks are reduced by 99% — heirs can inherit almost immediately. Check in with World ID to reverse this.
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsCheckInModalOpen(true)}
-                      className="btn-brass"
-                      style={{ padding: "8px 18px", fontSize: "0.75rem", whiteSpace: "nowrap", borderRadius: 0 }}
-                    >
-                      CHECK IN — I&apos;M ALIVE
-                    </button>
-                  </div>
-                )}
-
-                {/* Main Content Hero: the liveness status is the single most
-                    important visual on this page — a big status dial, not a
-                    card fighting for attention with a second card beside it. */}
                 {isStatusLoading && rawStatus === undefined ? (
-                  <div
-                    style={{
-                      padding: "32px",
-                      borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-                      display: "flex",
-                      justifyContent: "center",
-                      background: "rgba(255, 255, 255, 0.01)",
-                    }}
-                  >
+                  <div className="console-card" style={{ display: "flex", justifyContent: "center" }}>
                     <LivenessPanelSkeleton />
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      padding: "32px",
-                      borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-                      display: "flex",
-                      justifyContent: "center",
-                      background: "rgba(255, 255, 255, 0.01)",
-                    }}
-                  >
-                    <LivenessPanel
-                      status={status}
-                      lastCheckIn={lastCheckIn}
-                      checkInInterval={checkInInterval}
-                      gracePeriod={gracePeriod}
-                      livenessRegistered={livenessRegistered}
-                      isSettling={isSettling}
-                      onOpenCheckIn={() => setIsCheckInModalOpen(true)}
-                    />
-                  </div>
+                  <LivenessPanel
+                    status={status}
+                    lastCheckIn={lastCheckIn}
+                    checkInInterval={checkInInterval}
+                    gracePeriod={gracePeriod}
+                    contestableWindow={contestableWindow}
+                    livenessRegistered={livenessRegistered}
+                    isSettling={isSettling}
+                    onOpenCheckIn={() => setIsCheckInModalOpen(true)}
+                    onEditTiming={() => setActiveTab("parameters")}
+                  />
                 )}
 
-                {/* Succession lifecycle pipeline — where this vault currently
-                    sits across the liveness → distribution flow. */}
-                {(!isStatusLoading || rawStatus !== undefined) && (
-                  <div
-                    style={{
-                      padding: "24px 32px",
-                      borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-                      background: "rgba(255, 255, 255, 0.01)",
-                    }}
-                  >
-                    <span className="section-tag" style={{ margin: "0 0 16px", display: "block" }}>
-                      [ SUCCESSION LIFECYCLE ]
-                    </span>
-                    <PipelineVisualizer
-                      stages={LIFECYCLE_STAGES}
-                      currentIndex={vaultStageIndex(status)}
-                    />
-                  </div>
-                )}
-
+                <div className="console-card console-tabs-card">
                 {/* Main Focus Area: Underline Tabs */}
-                <div
-                  role="tablist"
-                  aria-label="Vault management sections"
-                  style={{
-                    display: "flex",
-                    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-                    background: "transparent",
-                    padding: "0 32px",
-                    overflowX: "auto",
-                  }}
-                >
+                <div role="tablist" aria-label="Vault management sections" className="console-tabs">
                   {[
-                    { id: "heirs", label: `Authorized Heirs (${heirs.length})` },
+                    { id: "heirs", label: `Heirs (${heirs.length})` },
                     { id: "guardians", label: `Guardians (${guardians.length})` },
-                    { id: "assets", label: `Allocated Assets (${assetList.length})` },
-                    { id: "parameters", label: `Timelock Parameters` },
-                    { id: "activity", label: `Activity Log` },
-                    { id: "watchdog", label: `Watchdog & Alerts` },
-                    { id: "message", label: `Legacy Message` },
+                    { id: "assets", label: `Assets (${assetList.length})` },
+                    { id: "parameters", label: `Timing` },
+                    { id: "activity", label: `Activity` },
+                    { id: "watchdog", label: `Alerts` },
+                    { id: "message", label: `Sealed Message` },
                   ].map((tab) => {
                     const isActive = activeTab === tab.id;
                     return (
@@ -1217,7 +1110,7 @@ export default function VaultDashboardPage() {
                   role="tabpanel"
                   id={`tabpanel-${activeTab}`}
                   aria-labelledby={`tab-${activeTab}`}
-                  style={{ padding: "32px", flex: 1 }}
+                  className="console-tabpanel"
                 >
                   {activeTab === "heirs" && (
                     <HeirList
@@ -1285,22 +1178,12 @@ export default function VaultDashboardPage() {
                       vaultAddress={selectedVault}
                       ownerAddress={address}
                       heirs={heirs}
+                      heirNames={heirNames}
+                      onGoToHeirs={() => setActiveTab("heirs")}
                     />
                   )}
                 </div>
-              </>
-          </div>
-
-          {/* Right Rail (~300px): Pinned Static Config */}
-          <VaultConfigRail
-            checkInInterval={checkInInterval}
-            gracePeriod={gracePeriod}
-            contestableWindow={contestableWindow}
-            vaultAddress={selectedVault}
-            verifierAddress={(vaultVerifier as string) || undefined}
-            onEditParameters={() => setActiveTab("parameters")}
-            onOpenAlerts={() => setActiveTab("watchdog")}
-          />
+                </div>
         </div>
         )}
       </div>
@@ -1325,6 +1208,7 @@ export default function VaultDashboardPage() {
         isOpen={isNamingVault}
         onClose={() => setIsNamingVault(false)}
         onDeploy={handleConfirmVaultName}
+        defaultOwnerName={knownOwnerName}
       />
 
       {/* Vault Deployment HUD Modal */}
@@ -1334,7 +1218,7 @@ export default function VaultDashboardPage() {
         txHash={deployTxHash}
         vaultAddress={deployedVaultAddr}
         errorMessage={deployErrorMessage}
-        onRetry={handleCreateVault}
+        onRetry={() => handleCreateVault()}
         onClose={() => {
           setIsCreatingVault(false);
           setDeployStage("idle");

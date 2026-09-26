@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { VaultStatus } from "@/lib/constants";
+import { VaultStatus, VAULT_STATUS_COPY } from "@/lib/constants";
 
 interface StatusLampProps {
   status: VaultStatus;
@@ -42,15 +42,15 @@ export function StatusLamp({
 
       if (status === VaultStatus.Green) {
         const remaining = Math.max(0, intervalSec - elapsed);
-        setTimeLabel("Next heartbeat due in");
+        setTimeLabel("Next check-in due in");
         setTimeText(fmt(remaining));
       } else if (status === VaultStatus.Amber) {
         const remaining = Math.max(0, intervalSec + graceSec - elapsed);
-        setTimeLabel("Turning Red in");
+        setTimeLabel("Claims open in");
         setTimeText(fmt(remaining));
       } else {
         const timeInRed = Math.max(0, elapsed - (intervalSec + graceSec));
-        setTimeLabel("Overdue by");
+        setTimeLabel("Claims open for");
         setTimeText(fmt(timeInRed));
       }
     };
@@ -75,21 +75,15 @@ export function StatusLamp({
   const statusColor =
     lampClass === "green" ? "var(--status-green)" : lampClass === "amber" ? "var(--status-amber)" : "var(--status-red)";
 
-  const bigWord = !isRegistered
-    ? "PENDING"
-    : status === VaultStatus.Green
-    ? "GREEN"
-    : status === VaultStatus.Amber
-    ? "AMBER"
-    : "RED";
+  const bigWord = !isRegistered ? "Not set up" : VAULT_STATUS_COPY[status].label;
 
   const statusDescription = !isRegistered
-    ? "Vault deployed. Complete initial World ID Orb registration to activate automated heartbeat protection."
+    ? "The owner hasn't set up World ID check-ins yet."
     : status === VaultStatus.Green
-    ? "Autonomous zero-knowledge World ID Orb heartbeat active on World Chain."
+    ? "The owner is checking in. Nothing for heirs to do."
     : status === VaultStatus.Amber
-    ? "Check-in cadence exceeded. Grace period active before inheritance claims unlock."
-    : "Liveness expired. Designated beneficiaries are authorized to execute succession.";
+    ? "The owner missed a check-in and is in their grace period."
+    : "The owner stopped checking in. Heirs can start a claim.";
 
   return (
     <div className="status-lamp-wrap animate-fade-up" style={{ padding: "12px 0 8px" }}>
@@ -112,12 +106,16 @@ export function StatusLamp({
         >
           {bigWord}
         </span>
-        <span className="font-data" style={{ fontSize: "1.375rem", fontWeight: 700, color: "#ffffff" }} aria-live="polite">
-          {timeText}
-        </span>
-        <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          {timeLabel}
-        </span>
+        {isRegistered && (
+          <>
+            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {timeLabel}
+            </span>
+            <span className="font-data" style={{ fontSize: "1.375rem", fontWeight: 700, color: "#ffffff" }} aria-live="polite">
+              {timeText}
+            </span>
+          </>
+        )}
       </div>
 
       <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", textAlign: "center", maxWidth: 380, lineHeight: 1.5, margin: "4px auto 0" }}>

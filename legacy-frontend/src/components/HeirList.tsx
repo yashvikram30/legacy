@@ -86,25 +86,19 @@ export function HeirList({
               margin: 0,
             }}
           >
-            Authorized Heirs
+            Heirs
           </h3>
           <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "4px", lineHeight: 1.5 }}>
-            Designated addresses permitted to initiate succession claims if this vault transitions to Red status.
+            The people who can claim this vault if you stop checking in.
           </p>
         </div>
         {!isGreen && (
-          <span
-            style={{
-              fontSize: "0.75rem",
-              fontFamily: "var(--font-data)",
-              color: "var(--status-amber)",
-              border: "1px solid var(--status-amber)",
-              padding: "4px 10px",
-              borderRadius: 0,
-              textTransform: "uppercase",
-            }}
-          >
-            Modifications Locked (Vault Not Green)
+          <span className="lock-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            Check in to make changes
           </span>
         )}
       </div>
@@ -224,23 +218,16 @@ export function HeirList({
           <table className="table-instrument">
             <thead>
               <tr style={{ backgroundColor: "rgba(255, 255, 255, 0.04)" }}>
-                <th style={{ width: "80px" }}>INDEX</th>
-                <th>BENEFICIARY</th>
-                <th>HEIR ADDRESS</th>
-                {isGreen && <th style={{ textAlign: "right" }}>ACTION</th>}
+                <th>HEIR</th>
+                {isGreen && <th style={{ textAlign: "right" }} aria-label="Actions" />}
               </tr>
             </thead>
             <tbody>
               {[1, 2].map((i) => (
                 <tr key={i}>
                   <td>
-                    <div className="skeleton-shimmer" style={{ width: "24px", height: "14px" }} />
-                  </td>
-                  <td>
-                    <div className="skeleton-shimmer" style={{ width: "220px", height: "20px" }} />
-                  </td>
-                  <td>
-                    <div className="skeleton-shimmer" style={{ width: "110px", height: "14px" }} />
+                    <div className="skeleton-shimmer" style={{ width: "180px", height: "18px", marginBottom: "6px" }} />
+                    <div className="skeleton-shimmer" style={{ width: "110px", height: "12px" }} />
                   </td>
                   {isGreen && (
                     <td style={{ textAlign: "right" }}>
@@ -262,7 +249,7 @@ export function HeirList({
           }}
         >
           <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0 }}>
-            No authorized heirs designated yet. Enter an address above to authorize a succession beneficiary.
+            {isGreen ? "No heirs yet. Add someone above by name and wallet address." : "No heirs yet. Check in to start adding them."}
           </p>
         </div>
       ) : (
@@ -270,10 +257,8 @@ export function HeirList({
           <table className="table-instrument">
             <thead>
               <tr style={{ backgroundColor: "rgba(255, 255, 255, 0.04)" }}>
-                <th style={{ width: "80px" }}>INDEX</th>
-                <th>BENEFICIARY</th>
-                <th>HEIR ADDRESS</th>
-                {isGreen && <th style={{ textAlign: "right" }}>ACTION</th>}
+                <th>HEIR</th>
+                {isGreen && <th style={{ textAlign: "right" }} aria-label="Actions" />}
               </tr>
             </thead>
             <tbody>
@@ -281,20 +266,19 @@ export function HeirList({
                 const heirName = heirNames[heir.toLowerCase()];
                 return (
                 <tr key={heir}>
-                  <td className="font-data" style={{ color: "var(--accent-brass)", fontSize: "0.8125rem" }}>
-                    0{idx + 1}{" //"}
-                  </td>
                   <td>
-                    {heirName ? (
-                      <span style={{ color: "#ffffff", fontSize: "0.875rem", fontWeight: 500 }}>{heirName}</span>
-                    ) : (
-                      <span style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", fontFamily: "var(--font-data)" }}>
-                        Beneficiary #{idx + 1}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                      <span
+                        style={{
+                          color: heirName ? "#ffffff" : "var(--text-secondary)",
+                          fontSize: "0.9375rem",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {heirName ?? `Heir ${idx + 1} (unnamed)`}
                       </span>
-                    )}
-                  </td>
-                  <td>
-                    <AddressChip address={heir} badge="" size="md" />
+                      <AddressChip address={heir} badge="" size="sm" />
+                    </div>
                   </td>
                   {isGreen && (
                     <td style={{ textAlign: "right" }}>
@@ -311,7 +295,7 @@ export function HeirList({
                           color: "var(--status-red)",
                         }}
                       >
-                        REVOKE
+                        Remove
                       </button>
                     </td>
                   )}

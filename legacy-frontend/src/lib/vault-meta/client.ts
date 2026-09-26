@@ -14,6 +14,7 @@ export interface VaultMetaRecord {
   vaultAddress: string;
   ownerAddress: string;
   vaultName?: string;
+  ownerName?: string;
   heirNames: HeirNameEntry[];
   createdAt: number;
   updatedAt: number;
@@ -41,16 +42,16 @@ export async function fetchVaultMetasByOwner(owner: string): Promise<VaultMetaRe
   }
 }
 
-export async function saveVaultName(
+export async function saveVaultNames(
   vaultAddress: string,
   ownerAddress: string,
-  vaultName: string
+  names: { vaultName?: string; ownerName?: string }
 ): Promise<boolean> {
   try {
     const res = await fetch("/api/vault-meta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ vaultAddress, ownerAddress, vaultName }),
+      body: JSON.stringify({ vaultAddress, ownerAddress, ...names }),
     });
     return res.ok;
   } catch {

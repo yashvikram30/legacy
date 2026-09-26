@@ -9,6 +9,7 @@ export interface IVaultMeta extends Document {
   vaultAddress: string;
   ownerAddress: string;
   vaultName?: string;
+  ownerName?: string;
   heirNames: IHeirName[];
   createdAt: Date;
   updatedAt: Date;
@@ -40,6 +41,11 @@ const VaultMetaSchema = new Schema<IVaultMeta>(
       index: true,
     },
     vaultName: {
+      type: String,
+      trim: true,
+    },
+    // How the owner wants heirs and guardians to see them (e.g. "Maria Chen").
+    ownerName: {
       type: String,
       trim: true,
     },

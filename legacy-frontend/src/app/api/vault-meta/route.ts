@@ -3,7 +3,7 @@ import { isAddress } from "viem";
 import {
   getVaultMeta,
   getVaultMetasByOwner,
-  setVaultName,
+  setVaultNames,
   setHeirName,
   removeHeirName,
 } from "@/lib/vault-meta/store";
@@ -52,6 +52,7 @@ interface VaultMetaPostBody {
   vaultAddress?: string;
   ownerAddress?: string;
   vaultName?: string;
+  ownerName?: string;
   heir?: { address?: string; name?: string };
   removeHeir?: string;
 }
@@ -92,15 +93,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, meta });
     }
 
-    if (body.vaultName !== undefined) {
-      const name = cleanName(body.vaultName);
-      if (!name) {
-        return NextResponse.json(
-          { error: `Vault name must be 1–${MAX_NAME_LENGTH} characters` },
-          { status: 400 }
-        );
+    if (body.vaultName !== undefined || body.ownerName !== undefined) {
+      const names: { vaultName?: string; ownerName?: string } = {};
+      if (body.vaultName !== undefined) {
+        const name = cleanName(body.vaultName);
+        if (!name) {
+          return NextResponse.json(
+            { error: `Vault name must be 1–${MAX_NAME_LENGTH} characters` },
+            { status: 400 }
+          );
+        }
+        names.vaultName = name;
       }
-      const meta = await setVaultName(body.vaultAddress, body.ownerAddress, name);
+      if (body.ownerName !== undefined) {
+        const name = cleanName(body.ownerName);
+        if (!name) {
+          return NextResponse.json(
+            { error: `Your name must be 1–${MAX_NAME_LENGTH} characters` },
+            { status: 400 }
+          );
+        }
+        names.ownerName = name;
+      }
+      const meta = await setVaultNames(body.vaultAddress, body.ownerAddress, names);
       return NextResponse.json({ success: true, meta });
     }
 
