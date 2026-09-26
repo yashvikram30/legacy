@@ -38,6 +38,86 @@ const PRESETS: { id: string; label: string; seconds: Record<FieldKey, number> }[
   { id: "standard", label: "Standard", seconds: { interval: 86400 * 30, grace: 86400 * 7, veto: 3600 * 48 } },
 ];
 
+const safeSeconds = (n: number) => (Number.isFinite(n) && n >= 0 ? n : 0);
+
+/**
+ * A compact clock face previewing the three phases as proportional arcs of
+ * one full cycle: checking-in (green) → grace (amber) → veto window (red).
+ * Purely a live preview of the form values below — not a countdown.
+ */
+function TimingClockPreview({
+  intervalSec,
+  graceSec,
+  vetoSec,
+  size = 168,
+  strokeWidth = 14,
+}: {
+  intervalSec: number;
+  graceSec: number;
+  vetoSec: number;
+  size?: number;
+  strokeWidth?: number;
+}) {
+  const total = Math.max(intervalSec + graceSec + vetoSec, 1);
+  const r = (size - strokeWidth) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const frac = (s: number) => s / total;
+  const greenEnd = frac(intervalSec);
+  const amberEnd = greenEnd + frac(graceSec);
+
+  // Rotate so drawing starts at 12 o'clock and sweeps clockwise, like the status dial.
+  const ringTransform = `rotate(-90 ${cx} ${cy})`;
+  const band = (from: number, to: number) => ({
+    strokeDasharray: `${Math.max(to - from, 0) * circumference} ${circumference}`,
+    strokeDashoffset: `${-from * circumference}`,
+  });
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Timing cycle preview">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border-hairline)" strokeWidth={strokeWidth} />
+        <g transform={ringTransform} strokeWidth={strokeWidth} fill="none" strokeLinecap="butt">
+          <circle cx={cx} cy={cy} r={r} stroke="var(--status-green)" style={{ transition: "stroke-dasharray 300ms ease-out" }} {...band(0, greenEnd)} />
+          <circle cx={cx} cy={cy} r={r} stroke="var(--status-amber)" style={{ transition: "stroke-dasharray 300ms ease-out, stroke-dashoffset 300ms ease-out" }} {...band(greenEnd, amberEnd)} />
+          <circle cx={cx} cy={cy} r={r} stroke="var(--status-red)" style={{ transition: "stroke-dasharray 300ms ease-out, stroke-dashoffset 300ms ease-out" }} {...band(amberEnd, 1)} />
+        </g>
+        {/* 12 o'clock marker, echoing the check-in ritual's "reset to top" moment */}
+        <circle cx={cx} cy={strokeWidth / 2 + 1} r={2} fill="var(--text-secondary)" />
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          padding: strokeWidth + 6,
+          pointerEvents: "none",
+        }}
+      >
+        <span className="font-data" style={{ fontSize: "1rem", fontWeight: 700, color: "#ffffff", lineHeight: 1.2 }}>
+          {humanDuration(total, 1)}
+        </span>
+        <span style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>full cycle</span>
+      </div>
+    </div>
+  );
+}
+
+function ClockLegendRow({ color, label, value }: { color: string; label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "0.8125rem" }}>
+      <span style={{ width: 9, height: 9, borderRadius: "50%", backgroundColor: color, flexShrink: 0, boxShadow: `0 0 6px ${color}` }} />
+      <span style={{ color: "var(--text-secondary)", flex: 1 }}>{label}</span>
+      <span className="font-data" style={{ color: "#ffffff", fontWeight: 600 }}>{value}</span>
+    </div>
+  );
+}
+
 /** Express seconds in the largest unit that divides evenly: 2592000 → 30 days. */
 function toDuration(totalSeconds: number): Duration {
   for (let i = UNITS.length - 1; i > 0; i--) {
@@ -167,6 +247,30 @@ export function VaultParameters({
             Check in to make changes
           </span>
         )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 28,
+          flexWrap: "wrap",
+          padding: "18px 20px",
+          borderRadius: 12,
+          border: "1px solid rgba(255, 255, 255, 0.08)",
+          background: "rgba(255, 255, 255, 0.02)",
+        }}
+      >
+        <TimingClockPreview
+          intervalSec={safeSeconds(seconds.interval)}
+          graceSec={safeSeconds(seconds.grace)}
+          vetoSec={safeSeconds(seconds.veto)}
+        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: "1 1 200px", minWidth: 180 }}>
+          <ClockLegendRow color="var(--status-green)" label="Checking in" value={allValid ? humanDuration(seconds.interval) : "—"} />
+          <ClockLegendRow color="var(--status-amber)" label="Grace period" value={allValid ? humanDuration(seconds.grace) : "—"} />
+          <ClockLegendRow color="var(--status-red)" label="Veto window" value={allValid ? humanDuration(seconds.veto) : "—"} />
+        </div>
       </div>
 
       <div className="setting-list">
