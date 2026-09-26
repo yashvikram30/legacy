@@ -47,9 +47,8 @@ export async function POST(request: Request) {
       console.warn("[Claim Alert] Unable to read contestableWindow on-chain, using fallback:", readErr);
     }
 
-    const host = request.headers.get("host") || "localhost:3000";
-    const protocol = request.headers.get("x-forwarded-proto") || "http";
-    const baseUrl = `${protocol}://${host}`;
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "https://legacy-drab-two.vercel.app";
 
     const res = await dispatchClaimAlert(
       sub,

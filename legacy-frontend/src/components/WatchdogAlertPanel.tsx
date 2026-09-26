@@ -94,10 +94,27 @@ export function WatchdogAlertPanel({
     }
   };
 
+  const togglePush = () => {
+    const next = !pushEnabled;
+    setPushEnabled(next);
+    if (ownerAddress) {
+      fetch("/api/notifications/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vaultAddress,
+          ownerAddress,
+          email: emailInput.trim().toLowerCase(),
+          pushEnabled: next,
+        }),
+      }).then(() => fetchSubscription());
+    }
+  };
+
   const handleSendTestAlert = async () => {
     if (!subscription?.email && !subscription?.pushEnabled) {
       setFeedback({
-        message: "Save an email address first.",
+        message: "Save an email address or enable wallet notifications first.",
         isError: true,
       });
       return;
@@ -138,24 +155,6 @@ export function WatchdogAlertPanel({
   };
 
   const isArmed = Boolean(subscription?.email || subscription?.pushEnabled);
-
-  const togglePush = () => {
-    const next = !pushEnabled;
-    setPushEnabled(next);
-    if (ownerAddress) {
-      fetch("/api/notifications/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vaultAddress,
-          ownerAddress,
-          email: emailInput.trim().toLowerCase(),
-          pushEnabled: next,
-        }),
-      }).then(() => fetchSubscription());
-    }
-  };
-
   const emailChanged = emailInput.trim().toLowerCase() !== (subscription?.email ?? "");
 
   return (

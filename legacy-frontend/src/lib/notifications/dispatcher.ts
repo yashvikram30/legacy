@@ -136,7 +136,7 @@ export async function dispatchHeartbeatAlert(
 ): Promise<{ success: boolean; channelsNotified: string[] }> {
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
   const formattedTime = formatDuration(secondsRemaining);
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   let subject = `[Legacy Vault] Proof-of-Liveness Check-In Due in ${formattedTime}`;
   let statusBadge = "Green Status Expirable";
@@ -212,7 +212,7 @@ export async function dispatchVaultCreatedAlert(
 ): Promise<{ success: boolean; channelsNotified: string[] }> {
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
   const formattedInterval = formatDuration(checkInIntervalSeconds);
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   const subject = `[Legacy Vault] Vault Armed — Short ${formattedInterval} Liveness Window`;
   const explanation = `Your Legacy Vault <code>${shortVault}</code> is now live and monitored. You configured a proof-of-liveness cadence of <strong>${formattedInterval}</strong>, which is under the standard 7-day window — so your first check-in deadline will arrive soon and the window will get over quickly. Perform a World ID check-in before it closes to keep the vault in the Green state.`;
@@ -271,7 +271,7 @@ export async function dispatchClaimAlert(
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
   const shortHeir = `${heirAddress.slice(0, 6)}...${heirAddress.slice(-4)}`;
   const windowTime = formatDuration(contestableWindowSeconds);
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   const subject = `[URGENT] Contestable Succession Claim Initiated on Vault ${shortVault}`;
   const explanation = `Heir <code>${heirAddress}</code> has initiated succession on your Legacy Vault. The contestable challenge window is now running.<br><br><strong>Owner Veto Right:</strong> If you are alive and well, you can invalidate and abort this claim at any time during this window simply by performing a World ID check-in.`;
@@ -333,7 +333,7 @@ export async function dispatchClaimExpiringAlert(
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
   const shortHeir = `${heirAddress.slice(0, 6)}...${heirAddress.slice(-4)}`;
   const formattedTime = formatDuration(secondsRemaining);
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   const subject = `[URGENT] Final ${formattedTime} to Veto Succession Claim on Vault ${shortVault}`;
   const explanation = `The contestable challenge window for the succession claim initiated by heir <code>${heirAddress}</code> is about to close in <strong>${formattedTime}</strong>.<br><br><strong>Owner Veto Right:</strong> If you are alive and wish to retain custody of your assets, you must perform a World ID check-in immediately before this window closes to invalidate this claim.`;
@@ -389,7 +389,7 @@ export async function dispatchClaimExpiredAlert(
 ): Promise<{ success: boolean; channelsNotified: string[] }> {
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
   const shortHeir = `${heirAddress.slice(0, 6)}...${heirAddress.slice(-4)}`;
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   const subject = `[NOTICE] Contestable Challenge Window Closed on Vault ${shortVault}`;
   const explanation = `The contestable challenge window on vault <code>${sub.vaultAddress}</code> has concluded without an owner veto. Heir <code>${heirAddress}</code> is now eligible to finalize and claim their allocated assets.`;
@@ -444,7 +444,7 @@ export async function dispatchTestAlert(
   baseUrl: string = process.env.NEXT_PUBLIC_APP_URL || "https://legacy-drab-two.vercel.app"
 ): Promise<{ success: boolean; channelsNotified: string[]; error?: string }> {
   const shortVault = `${sub.vaultAddress.slice(0, 6)}...${sub.vaultAddress.slice(-4)}`;
-  const vaultUrl = `${baseUrl}/vault?v=${sub.vaultAddress}`;
+  const vaultUrl = baseUrl;
 
   const subject = `[Legacy Protocol] Watchdog Alert System Verification`;
   const explanation = `This is a test notification confirming that your emergency dispatch pipeline is active and armed for vault <code>${sub.vaultAddress}</code>.<br><br>You will automatically receive pre-Amber heartbeat cadence warnings and instant alerts if any heir initiates succession.`;

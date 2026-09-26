@@ -1,4 +1,13 @@
-export type AlertThreshold = "7d" | "3d" | "24h" | "amber" | "claim_initiated" | "vault_created" | "test";
+export type AlertThreshold =
+  | "7d"
+  | "3d"
+  | "24h"
+  | "amber"
+  | "claim_initiated"
+  | "claim_expiring_24h"
+  | "claim_expired"
+  | "vault_created"
+  | "test";
 
 export type NotificationChannel = "email" | "push";
 
@@ -25,6 +34,12 @@ export interface VaultNotificationSubscription {
     threshold: AlertThreshold;
     timestamp: number;
     cycleEpoch: number; // correlates with contract lastCheckIn
+  };
+  lastClaimAlertSent?: {
+    threshold: AlertThreshold;
+    timestamp: number;
+    claimInitiatedAt: number;
+    heirAddress: `0x${string}`;
   };
   recentAlerts?: AlertLogEntry[];
 }

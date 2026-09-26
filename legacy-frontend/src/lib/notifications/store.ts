@@ -66,6 +66,14 @@ function docToSubscription(doc: IVaultSubscription): VaultNotificationSubscripti
           cycleEpoch: doc.lastAlertSent.cycleEpoch,
         }
       : undefined,
+    lastClaimAlertSent: doc.lastClaimAlertSent
+      ? {
+          threshold: doc.lastClaimAlertSent.threshold,
+          timestamp: doc.lastClaimAlertSent.timestamp,
+          claimInitiatedAt: doc.lastClaimAlertSent.claimInitiatedAt,
+          heirAddress: doc.lastClaimAlertSent.heirAddress as `0x${string}`,
+        }
+      : undefined,
     recentAlerts: (doc.recentAlerts || []).map((a) => ({
       id: a.id,
       threshold: a.threshold,
@@ -244,6 +252,47 @@ export async function updateLastAlert(
   const existing = memoryCache.get(key);
   if (existing) {
     existing.lastAlertSent = alertMeta;
+    existing.updatedAt = Date.now();
+    memoryCache.set(key, existing);
+    persistToFile();
+  }
+}
+
+export async function updateLastClaimAlert(
+  vaultAddress: string,
+  threshold: AlertThreshold,
+  claimInitiatedAt: number,
+  heirAddress: string
+): Promise<void> {
+  const key = vaultAddress.toLowerCase();
+  const claimAlertMeta = {
+    threshold,
+    timestamp: Date.now(),
+    claimInitiatedAt,
+    heirAddress: heirAddress.toLowerCase(),
+  };
+
+  try {
+    const conn = await connectToDatabase();
+    if (conn) {
+      await VaultSubscriptionModel.updateOne(
+        { vaultAddress: key },
+        { $set: { lastClaimAlertSent: claimAlertMeta } }
+      );
+    }
+  } catch (err) {
+    console.warn("[Store] Mongo updateLastClaimAlert failed:", err);
+  }
+
+  loadFromFile();
+  const existing = memoryCache.get(key);
+  if (existing) {
+    existing.lastClaimAlertSent = {
+      threshold,
+      timestamp: Date.now(),
+      claimInitiatedAt,
+      heirAddress: heirAddress.toLowerCase() as `0x${string}`,
+    };
     existing.updatedAt = Date.now();
     memoryCache.set(key, existing);
     persistToFile();
