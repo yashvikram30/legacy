@@ -169,187 +169,121 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
   if (!isHeir) return null;
 
   return (
-    <div
-      style={{
-        margin: "0 32px 32px",
-        padding: "24px",
-        border: "1px solid var(--border-hairline)",
-        background: "rgba(255,255,255,0.02)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-      }}
-    >
-      <span className="section-tag" style={{ margin: 0 }}>[ SEALED LEGACY MESSAGE ]</span>
+    <section className="console-card">
+      <div className="console-tabpanel panel-stack">
+        <h3 className="panel-title" style={{ fontSize: "1.0625rem" }}>
+          Sealed message
+        </h3>
 
-      {isLoading || !state ? (
-        <div className="skeleton-shimmer" style={{ width: "100%", height: 60 }} />
-      ) : !state.enrolled ? (
-        <>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-            The vault owner can leave you a private, encrypted message or video. Enroll your decryption key (a free,
-            gasless signature) so the owner can seal one to your wallet. Only you will ever be able to open it.
-          </p>
-          <button
-            type="button"
-            onClick={handleEnroll}
-            disabled={busy}
-            className="btn-hero-action"
-            style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-          >
-            <span>{busy ? "AWAITING SIGNATURE…" : "ENROLL DECRYPTION KEY"}</span>
-            <span className="arrow-icon" aria-hidden="true">→</span>
-          </button>
-        </>
-      ) : !state.hasSealed && !state.hasSealedVideo ? (
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-          ✓ You&apos;re enrolled. Nothing has been sealed to you yet — the owner can now leave a message or video, and
-          it will appear here to unseal after succession.
-        </p>
-      ) : !state.canReveal ? (
-        <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
-          <strong style={{ color: "var(--status-amber)" }}>
-            A sealed {state.hasSealed && state.hasSealedVideo ? "message and video await" : state.hasSealedVideo ? "video awaits" : "message awaits"} you.
-          </strong>{" "}
-          It unlocks once the vault enters succession (Red status). Until then it stays encrypted and cannot be
-          retrieved.
-        </p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          {state.hasSealed && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {revealed !== null ? (
-                <>
-                  <span style={{ fontSize: "0.75rem", color: "var(--status-green)", fontFamily: "var(--font-data)" }}>
-                    ✓ DECRYPTED · visible only in your browser
-                  </span>
-                  <pre
-                    className="font-data"
-                    style={{
-                      margin: 0,
-                      padding: "16px",
-                      background: "#000000",
-                      border: "1px solid var(--status-green)",
-                      color: "#ffffff",
-                      fontSize: "0.875rem",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {revealed}
-                  </pre>
-                  <button
-                    type="button"
-                    onClick={() => setRevealed(null)}
-                    className="btn-secondary"
-                    style={{ alignSelf: "flex-start", padding: "6px 14px", fontSize: "0.75rem" }}
-                  >
-                    Hide
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
-                    <strong style={{ color: "var(--status-green)" }}>A sealed message is ready.</strong> Sign to
-                    derive your key and decrypt it locally in your browser.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleUnseal}
-                    disabled={busy}
-                    className="btn-hero-action"
-                    style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-                  >
-                    <span>{busy ? "DECRYPTING…" : "UNSEAL MESSAGE"}</span>
-                    <span className="arrow-icon" aria-hidden="true">→</span>
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {state.hasSealedVideo && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                borderTop: state.hasSealed ? "1px solid var(--border-hairline)" : undefined,
-                paddingTop: state.hasSealed ? 16 : 0,
-              }}
-            >
-              {revealedVideoUrl ? (
-                <>
-                  <span style={{ fontSize: "0.75rem", color: "var(--status-green)", fontFamily: "var(--font-data)" }}>
-                    ✓ DECRYPTED · visible only in your browser
-                  </span>
-                  <video controls src={revealedVideoUrl} style={{ width: "100%", maxHeight: 420, background: "#000000" }} />
-                  <button
-                    type="button"
-                    onClick={() => setRevealedVideoUrl(null)}
-                    className="btn-secondary"
-                    style={{ alignSelf: "flex-start", padding: "6px 14px", fontSize: "0.75rem" }}
-                  >
-                    Hide
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
-                    <strong style={{ color: "var(--status-green)" }}>A sealed video is ready.</strong> Sign to derive
-                    your key and decrypt it locally in your browser.
-                  </p>
-                  {videoStage && (
-                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontFamily: "var(--font-data)" }}>
-                      {videoStage}
+{isLoading || !state ? (
+          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: 12 }} />
+        ) : !state.enrolled ? (
+          <>
+            <p className="panel-lead">
+              Set up your key (free, one signature) so only you can read a message or video the owner leaves you.
+            </p>
+            <button type="button" onClick={handleEnroll} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+              {busy ? "Waiting for signature…" : "Set up your key"}
+            </button>
+          </>
+        ) : !state.hasSealed && !state.hasSealedVideo ? (
+          <p className="panel-lead">Nothing yet. It&apos;ll appear here once the owner seals a message or video.</p>
+        ) : !state.canReveal ? (
+          <div className="panel-note">
+            <strong>
+              A sealed {state.hasSealed && state.hasSealedVideo ? "message and video are" : state.hasSealedVideo ? "video is" : "message is"} waiting.
+            </strong>{" "}
+            It unlocks once claims open.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {state.hasSealed && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {revealed !== null ? (
+                  <>
+                    <span className="state-pill">
+                      <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
+                      Decrypted · visible only in your browser
                     </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleUnsealVideo}
-                    disabled={videoBusy}
-                    className="btn-hero-action"
-                    style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-                  >
-                    <span>{videoBusy ? "DECRYPTING…" : "UNSEAL VIDEO"}</span>
-                    <span className="arrow-icon" aria-hidden="true">→</span>
-                  </button>
-                  {videoError && (
-                    <div
-                      style={{
-                        padding: "10px 14px",
-                        fontSize: "0.8125rem",
-                        fontFamily: "var(--font-data)",
-                        color: "#ffffff",
-                        border: "1px solid var(--status-red)",
-                        background: "rgba(193,80,63,0.12)",
-                      }}
+                    <pre
+                      className="panel-summary font-data"
+                      style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                     >
-                      {videoError}
+                      {revealed}
+                    </pre>
+                    <button
+                      type="button"
+                      onClick={() => setRevealed(null)}
+                      className="flow-btn flow-btn--ghost"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      Hide
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="panel-note panel-note--success">
+                      <strong>A sealed message is ready.</strong> Sign to decrypt it in your browser.
                     </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                    <button type="button" onClick={handleUnseal} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+                      {busy ? "Decrypting…" : "Unseal message"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
 
-      {error && (
-        <div
-          style={{
-            padding: "10px 14px",
-            fontSize: "0.8125rem",
-            fontFamily: "var(--font-data)",
-            color: "#ffffff",
-            border: "1px solid var(--status-red)",
-            background: "rgba(193,80,63,0.12)",
-          }}
-        >
-          {error}
-        </div>
-      )}
-    </div>
+            {state.hasSealedVideo && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  borderTop: state.hasSealed ? "1px solid var(--border-hairline)" : undefined,
+                  paddingTop: state.hasSealed ? 16 : 0,
+                }}
+              >
+                {revealedVideoUrl ? (
+                  <>
+                    <span className="state-pill">
+                      <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
+                      Decrypted · visible only in your browser
+                    </span>
+                    <video controls src={revealedVideoUrl} style={{ width: "100%", maxHeight: 420, borderRadius: 12, background: "#000000" }} />
+                    <button
+                      type="button"
+                      onClick={() => setRevealedVideoUrl(null)}
+                      className="flow-btn flow-btn--ghost"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      Hide
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="panel-note panel-note--success">
+                      <strong>A sealed video is ready.</strong> Sign to decrypt it in your browser.
+                    </div>
+                    {videoStage && <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{videoStage}</span>}
+                    <button
+                      type="button"
+                      onClick={handleUnsealVideo}
+                      disabled={videoBusy}
+                      className="flow-btn"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      {videoBusy ? "Decrypting…" : "Unseal video"}
+                    </button>
+                    {videoError && <div className="panel-note panel-note--error">{videoError}</div>}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && <div className="panel-note panel-note--error">{error}</div>}
+      </div>
+    </section>
   );
 }
