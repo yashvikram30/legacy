@@ -75,13 +75,21 @@ const DURATION_UNITS: [number, string][] = [
   [1, "second"],
 ];
 
-/** Largest whole unit, pluralized: 45 → "45 seconds", 2592000 → "30 days". */
-export function humanDuration(seconds: number): string {
+const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+
+/**
+ * Largest unit plus the next one down when there's a remainder:
+ * 45 → "45 seconds", 615 → "10 minutes 15 seconds", 2592000 → "30 days".
+ */
+export function humanDuration(seconds: number, maxUnits: 1 | 2 = 2): string {
   const s = Math.max(0, Math.floor(seconds));
-  for (const [size, unit] of DURATION_UNITS) {
+  for (let i = 0; i < DURATION_UNITS.length; i++) {
+    const [size, unit] = DURATION_UNITS[i];
     if (s >= size || size === 1) {
       const n = Math.floor(s / size);
-      return `${n} ${unit}${n === 1 ? "" : "s"}`;
+      const next = DURATION_UNITS[i + 1];
+      const rest = next && maxUnits > 1 ? Math.floor((s % size) / next[0]) : 0;
+      return rest > 0 ? `${plural(n, unit)} ${plural(rest, next[1])}` : plural(n, unit);
     }
   }
   return "0 seconds";
@@ -90,7 +98,7 @@ export function humanDuration(seconds: number): string {
 /** "3 days ago" for a unix timestamp in seconds. */
 export function timeAgo(unixSeconds: number): string {
   const elapsed = Date.now() / 1000 - unixSeconds;
-  return elapsed < 5 ? "just now" : `${humanDuration(elapsed)} ago`;
+  return elapsed < 5 ? "just now" : `${humanDuration(elapsed, 1)} ago`;
 }
 
 export enum ClaimStatus {
