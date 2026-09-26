@@ -166,6 +166,167 @@ function toSeconds(d: Duration): number {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * d.unit) : NaN;
 }
 
+/** The dial's full-scale ceiling — generous enough to cover the "Standard" preset. */
+const DIAL_MAX_SECONDS = 86400 * 30;
+
+const FIELD_COLOR: Record<FieldKey, string> = {
+  interval: "var(--status-green)",
+  grace: "var(--status-amber)",
+  veto: "var(--status-red)",
+};
+
+/** Snap a raw log-scale drag value to a friendlier increment based on its magnitude. */
+function niceRoundSeconds(s: number): number {
+  const v = Math.max(0, s);
+  if (v < 60) return Math.round(v);
+  if (v < 3600) return Math.round(v / 15) * 15;
+  if (v < 86400) return Math.round(v / 300) * 300;
+  if (v < 86400 * 7) return Math.round(v / 3600) * 3600;
+  return Math.round(v / 86400) * 86400;
+}
+
+interface DurationDialProps {
+  /** current value in seconds; NaN while the field is empty/invalid */
+  seconds: number;
+  min: number;
+  max: number;
+  color: string;
+  label: string;
+  disabled?: boolean;
+  onChange: (seconds: number) => void;
+  size?: number;
+}
+
+/**
+ * A single draggable ring standing in for a duration field: drag (or arrow
+ * keys) around it to set the value on a log scale, since these fields span
+ * seconds to weeks. Replaces typing a number + picking a unit.
+ */
+function DurationDial({ seconds, min, max, color, label, disabled, onChange, size = 108 }: DurationDialProps) {
+  const strokeWidth = 9;
+  const r = (size - strokeWidth) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+
+  const logMin = Math.log(Math.max(min, 1));
+  const logMax = Math.log(Math.max(max, min + 1));
+  const current = Number.isFinite(seconds) ? seconds : min;
+  const clamped = Math.min(Math.max(current, min), max);
+  const frac = logMax === logMin ? 0 : (Math.log(Math.max(clamped, 1)) - logMin) / (logMax - logMin);
+
+  const ringTransform = `rotate(-90 ${cx} ${cy})`;
+
+  const fracFromPoint = (clientX: number, clientY: number, el: Element) => {
+    const rect = el.getBoundingClientRect();
+    const x = clientX - (rect.left + rect.width / 2);
+    const y = clientY - (rect.top + rect.height / 2);
+    let deg = (Math.atan2(y, x) * 180) / Math.PI + 90;
+    if (deg < 0) deg += 360;
+    return deg / 360;
+  };
+
+  const applyFrac = (f: number) => {
+    // Dragging to the very top of a field whose true floor is 0 (e.g. grace
+    // period) snaps to exactly 0, rather than an unreachable log-scale limit.
+    const raw = min <= 0 && f < 0.015 ? 0 : Math.exp(logMin + f * (logMax - logMin));
+    onChange(Math.min(Math.max(niceRoundSeconds(raw), min), max));
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (disabled) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    applyFrac(fracFromPoint(e.clientX, e.clientY, e.currentTarget));
+  };
+  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (disabled || e.buttons !== 1) return;
+    applyFrac(fracFromPoint(e.clientX, e.clientY, e.currentTarget));
+  };
+
+  const step = (dir: 1 | -1) => {
+    if (disabled) return;
+    const base = Math.max(current, min, 1);
+    const delta = Math.exp(Math.log(base) + dir * (logMax - logMin) * 0.03) - base;
+    const next = current + (delta !== 0 ? delta : dir);
+    onChange(Math.min(Math.max(niceRoundSeconds(next), min), max));
+  };
+
+  const knobAngleRad = (frac * 360 - 90) * (Math.PI / 180);
+  const knobX = cx + Math.cos(knobAngleRad) * r;
+  const knobY = cy + Math.sin(knobAngleRad) * r;
+
+  return (
+    <div
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={label}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={Math.round(clamped)}
+      aria-valuetext={Number.isFinite(seconds) ? humanDuration(seconds) : "unset"}
+      aria-disabled={disabled}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowUp" || e.key === "ArrowRight") {
+          e.preventDefault();
+          step(1);
+        } else if (e.key === "ArrowDown" || e.key === "ArrowLeft") {
+          e.preventDefault();
+          step(-1);
+        }
+      }}
+      style={{ position: "relative", width: size, height: size, outline: "none", touchAction: "none" }}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        style={{ cursor: disabled ? "default" : "grab", display: "block" }}
+      >
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border-hairline)" strokeWidth={strokeWidth} />
+        <g transform={ringTransform}>
+          <circle
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            style={{
+              strokeDasharray: `${Math.max(frac, 0.01) * circumference} ${circumference}`,
+              opacity: disabled ? 0.4 : 1,
+              transition: "stroke-dasharray 120ms ease-out",
+              filter: disabled ? undefined : `drop-shadow(0 0 4px ${color})`,
+            }}
+          />
+        </g>
+        {!disabled && <circle cx={knobX} cy={knobY} r={5} fill="#ffffff" stroke={color} strokeWidth={2} />}
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "none",
+          padding: strokeWidth + 6,
+          textAlign: "center",
+        }}
+      >
+        <span
+          className="font-data"
+          style={{ fontSize: "0.8125rem", fontWeight: 700, color: disabled ? "var(--text-secondary)" : "#ffffff", lineHeight: 1.2 }}
+        >
+          {Number.isFinite(seconds) ? humanDuration(seconds, 1) : "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function fromChain(interval: bigint, grace: bigint, veto: bigint): Durations {
   return {
     interval: toDuration(Number(interval)),
@@ -313,31 +474,15 @@ export function VaultParameters({
               <span>{f.hint}</span>
             </div>
             <div className="setting-control">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                inputMode="decimal"
-                className="flow-input"
-                aria-label={`${f.label} amount`}
-                value={values[f.key].amount}
-                onChange={(e) => setField(f.key, { amount: e.target.value })}
+              <DurationDial
+                seconds={seconds[f.key]}
+                min={f.min}
+                max={DIAL_MAX_SECONDS}
+                color={FIELD_COLOR[f.key]}
+                label={f.label}
                 disabled={disabled}
-                style={{ width: 96 }}
+                onChange={(s) => setField(f.key, toDuration(s))}
               />
-              <select
-                className="flow-select"
-                aria-label={`${f.label} unit`}
-                value={values[f.key].unit}
-                onChange={(e) => setField(f.key, { unit: Number(e.target.value) })}
-                disabled={disabled}
-              >
-                {UNITS.map((u) => (
-                  <option key={u.label} value={u.seconds}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
         ))}
