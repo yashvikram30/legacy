@@ -64,7 +64,6 @@ export function CheckInModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [warningText, setWarningText] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"worldid" | "dev">("worldid");
   const [isIdkitOpen, setIsIdkitOpen] = useState(false);
   const [rpContext, setRpContext] = useState<RpContext | undefined>(undefined);
   const [environment, setEnvironment] = useState<"staging" | "production">("staging");
@@ -113,15 +112,8 @@ export function CheckInModal({
       // Pre-flight check: if checking in on an already-registered vault, ensure nullifier matches
       if (!isRegister && registeredNullifierRaw !== undefined && registeredNullifierRaw !== 0n) {
         if (nullifierHash !== registeredNullifierRaw) {
-          const isDevRegistered = registeredNullifierRaw === 42n;
           throw new Error(
-            `Nullifier Mismatch: This vault (${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}) is already registered with nullifier ${
-              isDevRegistered ? "42 (Dev Instant Mode)" : registeredNullifierRaw.toString().slice(0, 10) + "..."
-            }. Your current session generated a different World ID nullifier (${nullifierHash.toString().slice(0, 10)}...). ${
-              isDevRegistered
-                ? "Please switch to the 'Dev Instant Mode' tab to check in for this vault, or select an un-enrolled vault (like 0x8e54...) to use your World ID."
-                : "Please check in using the original World ID persona that registered this vault."
-            }`
+            `Nullifier Mismatch: This vault (${vaultAddress.slice(0, 6)}...${vaultAddress.slice(-4)}) is already registered with nullifier ${registeredNullifierRaw.toString().slice(0, 10)}.... Your current session generated a different World ID nullifier (${nullifierHash.toString().slice(0, 10)}...). Please check in using the original World ID persona that registered this vault.`
           );
         }
       }
@@ -149,7 +141,7 @@ export function CheckInModal({
         msg.includes("gas limit too high") ||
         msg.includes("0x12c1")
       ) {
-        msg = "Verification reverted: This vault is linked to the production World ID router verifier (0x9200aba1...), which rejects testnet / Dev Mode roots. Please close this modal and click '+ Deploy Another Vault' on the dashboard to create a vault connected to the verified testnet verifier (0xbc53b9fa...), where Dev Instant Mode and staging proofs work smoothly.";
+        msg = "Verification reverted: This vault is linked to the production World ID router verifier (0x9200aba1...), which rejects testnet roots. Please close this modal and click '+ Deploy Another Vault' on the dashboard to create a vault connected to the verified testnet verifier (0xbc53b9fa...), where staging proofs work smoothly.";
       }
       setErrorText(msg);
       throw err;
@@ -255,24 +247,6 @@ export function CheckInModal({
     } catch (e) {
       console.warn("Backend Developer Portal verify error (non-fatal for on-chain contract):", e);
     }
-  };
-
-  // Dev / Testing instant proof
-  const handleSimulateProof = async () => {
-    const root = BigInt(1);
-    const nullifierHash = BigInt(42);
-    const dummyProof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint] = [
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-      BigInt(0),
-    ];
-
-    await handleExecuteProof(root, nullifierHash, dummyProof, !livenessRegistered);
   };
 
   return (
@@ -399,152 +373,55 @@ export function CheckInModal({
             </button>
           </div>
 
-          {/* Tab switch: Live IDKit vs Dev Mode */}
-          <div
-            style={{
-              display: "flex",
-              backgroundColor: "#000000",
-              border: "1px solid rgba(255, 255, 255, 0.14)",
-              borderRadius: 0,
-              padding: "3px",
-              gap: "3px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("worldid");
-                setErrorText(null);
-              }}
-              style={{
-                flex: 1,
-                padding: "9px 12px",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                fontFamily: "var(--font-data)",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                backgroundColor: activeTab === "worldid" ? "rgba(184, 137, 74, 0.16)" : "transparent",
-                color: activeTab === "worldid" ? "var(--accent-brass)" : "var(--text-secondary)",
-                border: activeTab === "worldid" ? "1px solid var(--accent-brass)" : "1px solid transparent",
-                borderRadius: 0,
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-              }}
-            >
-              World ID (Official IDKit)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("dev");
-                setErrorText(null);
-              }}
-              style={{
-                flex: 1,
-                padding: "9px 12px",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                fontFamily: "var(--font-data)",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                backgroundColor: activeTab === "dev" ? "rgba(184, 137, 74, 0.16)" : "transparent",
-                color: activeTab === "dev" ? "var(--accent-brass)" : "var(--text-secondary)",
-                border: activeTab === "dev" ? "1px solid var(--accent-brass)" : "1px solid transparent",
-                borderRadius: 0,
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-              }}
-            >
-              Dev Instant Mode
-            </button>
-          </div>
-
-          {/* Dev Mode Banner */}
-          {activeTab === "dev" && (
+          {/* Verification Environment Toggle */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             <div
               style={{
-                padding: "12px 16px",
-                backgroundColor: "rgba(184, 137, 74, 0.08)",
-                border: "1px solid rgba(184, 137, 74, 0.35)",
-                borderRadius: 0,
-                fontSize: "0.8125rem",
-                color: "var(--text-secondary)",
-                lineHeight: 1.5,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 14px",
+                background: "#000000",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
               }}
             >
-              <div className="section-tag" style={{ margin: "0 0 4px", fontSize: "0.6875rem" }}>
-                [ MOCKWORLDID TESTNET MODE ]
-              </div>
-              Submits deterministic test parameters (<code className="font-data" style={{ color: "#ffffff" }}>root=1, nullifier=42</code>) directly against MockWorldID for rapid on-chain testing without scanning a QR code.
-            </div>
-          )}
-
-          {/* Official IDKit Mode Details & Environment Toggle */}
-          {activeTab === "worldid" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {registeredNullifierRaw === 42n && (
-                <div
+              <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase" }}>
+                Verification Target
+              </span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  type="button"
+                  onClick={() => setEnvironment("staging")}
                   style={{
-                    padding: "10px 14px",
-                    backgroundColor: "rgba(184, 137, 74, 0.12)",
-                    border: "1px solid var(--accent-brass)",
-                    fontSize: "0.75rem",
-                    color: "var(--accent-brass)",
-                    lineHeight: 1.4,
+                    padding: "4px 8px",
+                    fontSize: "0.6875rem",
+                    fontFamily: "var(--font-data)",
+                    backgroundColor: environment === "staging" ? "rgba(184, 137, 74, 0.25)" : "transparent",
+                    color: environment === "staging" ? "var(--accent-brass)" : "var(--text-secondary)",
+                    border: environment === "staging" ? "1px solid var(--accent-brass)" : "1px solid rgba(255, 255, 255, 0.15)",
+                    cursor: "pointer",
                   }}
                 >
-                  ⚡ <strong>Notice:</strong> This vault was initially registered using <strong>Dev Instant Mode (Nullifier: 42)</strong>. Under protocol rules, only that identity can refresh this vault. To check in, switch to the <strong>Dev Instant Mode</strong> tab above, or switch vaults to <strong>0x8e54...04C9</strong> to use your World ID.
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "10px 14px",
-                  background: "#000000",
-                  border: "1px solid rgba(255, 255, 255, 0.12)",
-                }}
-              >
-                <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase" }}>
-                  Verification Target
-                </span>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  <button
-                    type="button"
-                    onClick={() => setEnvironment("staging")}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: "0.6875rem",
-                      fontFamily: "var(--font-data)",
-                      backgroundColor: environment === "staging" ? "rgba(184, 137, 74, 0.25)" : "transparent",
-                      color: environment === "staging" ? "var(--accent-brass)" : "var(--text-secondary)",
-                      border: environment === "staging" ? "1px solid var(--accent-brass)" : "1px solid rgba(255, 255, 255, 0.15)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Simulator (Staging)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEnvironment("production")}
-                    style={{
-                      padding: "4px 8px",
-                      fontSize: "0.6875rem",
-                      fontFamily: "var(--font-data)",
-                      backgroundColor: environment === "production" ? "rgba(76, 175, 109, 0.2)" : "transparent",
-                      color: environment === "production" ? "var(--status-green)" : "var(--text-secondary)",
-                      border: environment === "production" ? "1px solid var(--status-green)" : "1px solid rgba(255, 255, 255, 0.15)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    World App (Production)
-                  </button>
-                </div>
+                  Simulator (Staging)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEnvironment("production")}
+                  style={{
+                    padding: "4px 8px",
+                    fontSize: "0.6875rem",
+                    fontFamily: "var(--font-data)",
+                    backgroundColor: environment === "production" ? "rgba(76, 175, 109, 0.2)" : "transparent",
+                    color: environment === "production" ? "var(--status-green)" : "var(--text-secondary)",
+                    border: environment === "production" ? "1px solid var(--status-green)" : "1px solid rgba(255, 255, 255, 0.15)",
+                    cursor: "pointer",
+                  }}
+                >
+                  World App (Production)
+                </button>
               </div>
             </div>
-          )}
+          </div>
 
           {/* Telemetry and Signal Box */}
           <div
@@ -621,7 +498,7 @@ export function CheckInModal({
           {/* Action Button */}
           <button
             type="button"
-            onClick={activeTab === "worldid" ? handleOpenIdkitWidget : handleSimulateProof}
+            onClick={handleOpenIdkitWidget}
             disabled={isProcessing}
             className="btn-hero-action"
             style={{
@@ -634,13 +511,7 @@ export function CheckInModal({
             }}
           >
             <span>
-              {isProcessing
-                ? "PREPARING WORLD ID REQUEST…"
-                : activeTab === "worldid"
-                ? "LAUNCH OFFICIAL WORLD ID (IDKIT)"
-                : livenessRegistered
-                ? "EXECUTE INSTANT CHECK-IN"
-                : "REGISTER INITIAL LIVENESS"}
+              {isProcessing ? "PREPARING WORLD ID REQUEST…" : "LAUNCH OFFICIAL WORLD ID (IDKIT)"}
             </span>
             <span className="arrow-icon" aria-hidden="true">→</span>
           </button>

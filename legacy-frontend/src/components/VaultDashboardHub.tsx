@@ -7,6 +7,7 @@ import { getAbiItem } from "viem";
 import { useAccount, usePublicClient, useReadContracts } from "wagmi";
 import { VaultStatus } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
+import { fetchVaultMetasByOwner } from "@/lib/vault-meta/client";
 
 interface VaultDashboardHubProps {
   ownedVaults: readonly `0x${string}`[];
@@ -25,6 +26,7 @@ interface HeirVaultEntry {
 }
 
 const heirAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "HeirAdded" });
+const guardianAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "GuardianAdded" });
 
 function statusLabel(status: VaultStatus | null) {
   if (status === VaultStatus.Green) return { text: "GREEN", color: "var(--status-green)" };
@@ -65,6 +67,7 @@ function cardStaggerStyle(index: number): React.CSSProperties {
 
 function VaultCard({
   vaultAddress,
+  vaultName,
   status,
   metaLabel,
   metaValue,
@@ -74,6 +77,7 @@ function VaultCard({
   style,
 }: {
   vaultAddress: `0x${string}`;
+  vaultName?: string;
   status: VaultStatus | null;
   metaLabel: string;
   metaValue: string;
@@ -102,9 +106,30 @@ function VaultCard({
       }}
     >
       <StatusDot status={status} />
-      <div className="font-data" style={{ fontSize: "0.8125rem", color: "#ffffff" }}>
-        {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
-      </div>
+      {vaultName ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div
+            style={{
+              fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
+              fontSize: "1rem",
+              color: "#ffffff",
+              letterSpacing: "0.02em",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {vaultName}
+          </div>
+          <div className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>
+            {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
+          </div>
+        </div>
+      ) : (
+        <div className="font-data" style={{ fontSize: "0.8125rem", color: "#ffffff" }}>
+          {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
+        </div>
+      )}
       <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
         {metaLabel}: <span style={{ color: "var(--text-primary)" }}>{metaValue}</span>
       </div>
@@ -149,6 +174,24 @@ export function VaultDashboardHub({
     query: { enabled: ownedVaults.length > 0, refetchInterval: 5000 },
   });
 
+  // Off-chain vault names for owned vaults (best-effort; falls back to address)
+  const [vaultNames, setVaultNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
+    fetchVaultMetasByOwner(address).then((metas) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const m of metas) {
+        if (m.vaultName) map[m.vaultAddress.toLowerCase()] = m.vaultName;
+      }
+      setVaultNames(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, ownedVaults.length]);
+
   const ownedCards = ownedVaults.map((v, i) => {
     const statusRes = ownedResults?.[i * 2];
     const heirCountRes = ownedResults?.[i * 2 + 1];
@@ -156,6 +199,7 @@ export function VaultDashboardHub({
       vault: v,
       status: statusRes?.status === "success" ? (Number(statusRes.result) as VaultStatus) : null,
       heirCount: heirCountRes?.status === "success" ? Number(heirCountRes.result) : null,
+      name: vaultNames[v.toLowerCase()],
     };
   });
 
@@ -202,6 +246,47 @@ export function VaultDashboardHub({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- async log scan, not a sync setState
     scanHeirVaults();
   }, [scanHeirVaults]);
+
+  // ── Guardian-side discovery: scan GuardianAdded logs for this address,
+  // then confirm current guardianship (handles removals) ──
+  const [guardianVaults, setGuardianVaults] = useState<HeirVaultEntry[]>([]);
+  const [isLoadingGuardianVaults, setIsLoadingGuardianVaults] = useState(false);
+
+  const scanGuardianVaults = useCallback(async () => {
+    if (!publicClient || !address || !guardianAddedEvent) return;
+    try {
+      setIsLoadingGuardianVaults(true);
+      const logs = await publicClient.getLogs({
+        event: guardianAddedEvent,
+        args: { guardian: address },
+        fromBlock: 0n,
+        toBlock: "latest",
+      });
+      const candidates = Array.from(new Set(logs.map((l) => l.address)));
+
+      const results = await Promise.all(
+        candidates.map(async (vault) => {
+          const [isGuardianNow, statusNow, ownerNow] = await Promise.all([
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isGuardian", args: [address] }),
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
+          ]);
+          return isGuardianNow ? { vault, status: Number(statusNow) as VaultStatus, owner: ownerNow as `0x${string}` } : null;
+        })
+      );
+
+      setGuardianVaults(results.filter((r): r is HeirVaultEntry => r !== null));
+    } catch (err) {
+      console.error("❌ [Dashboard] Failed to scan for guardian vaults:", err);
+    } finally {
+      setIsLoadingGuardianVaults(false);
+    }
+  }, [publicClient, address]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async log scan, not a sync setState
+    scanGuardianVaults();
+  }, [scanGuardianVaults]);
 
   const hasOwned = ownedVaults.length > 0;
 
@@ -274,6 +359,7 @@ export function VaultDashboardHub({
               <VaultCard
                 key={card.vault}
                 vaultAddress={card.vault}
+                vaultName={card.name}
                 status={card.status}
                 metaLabel="Heirs"
                 metaValue={card.heirCount === null ? "…" : String(card.heirCount)}
@@ -339,6 +425,40 @@ export function VaultDashboardHub({
           </Link>
         </p>
       </section>
+
+      {/* ── Vaults You Safeguard (guardian) ─────────────────────── */}
+      {(isLoadingGuardianVaults || guardianVaults.length > 0) && (
+        <section>
+          <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
+            Vaults You Safeguard {guardianVaults.length > 0 ? `(${guardianVaults.length})` : ""}
+          </h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", marginTop: "-8px", marginBottom: "16px", lineHeight: 1.5, maxWidth: 560 }}>
+            Vaults where the owner trusts you to attest to their passing. If every guardian attests, the vault&apos;s inheritance timers are cut by 99%.
+          </p>
+
+          {isLoadingGuardianVaults ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+              <CardSkeleton />
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+              {guardianVaults.map((entry, i) => (
+                <VaultCard
+                  key={entry.vault}
+                  vaultAddress={entry.vault}
+                  status={entry.status}
+                  metaLabel="Owner"
+                  metaValue={`${entry.owner.slice(0, 6)}…${entry.owner.slice(-4)}`}
+                  ctaLabel="Review & Attest"
+                  onClick={() => router.push(`/claim?v=${entry.vault}`)}
+                  urgent={entry.status === VaultStatus.Red}
+                  style={cardStaggerStyle(i)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

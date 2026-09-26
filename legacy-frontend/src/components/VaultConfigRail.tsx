@@ -202,7 +202,7 @@ export function VaultConfigRail({
             />
             <div style={{ display: "flex", flexDirection: "column" }}>
               <span style={{ fontSize: "0.75rem", color: "#ffffff", fontWeight: 600 }}>Heartbeat Monitoring</span>
-              <span style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>Telegram & Push Alerts</span>
+              <span style={{ fontSize: "0.6875rem", color: "var(--text-secondary)" }}>Email & Push Alerts</span>
             </div>
           </div>
         </div>

@@ -132,6 +132,32 @@ export const LegacyVaultABI = [
   },
   {
     "type": "function",
+    "name": "DEATH_ACCEL_DENOMINATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEATH_ACCEL_NUMERATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_CHECK_IN_INTERVAL",
     "inputs": [],
     "outputs": [
@@ -155,6 +181,19 @@ export const LegacyVaultABI = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addGuardian",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -228,6 +267,13 @@ export const LegacyVaultABI = [
         "internalType": "contract IVaultExecutor"
       }
     ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "attestDeath",
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -320,6 +366,45 @@ export const LegacyVaultABI = [
   },
   {
     "type": "function",
+    "name": "deathAttestationCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deathConfirmed",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deathConfirmedAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "executeClaim",
     "inputs": [
       {
@@ -337,6 +422,55 @@ export const LegacyVaultABI = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getEffectiveTimelock",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "interval",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "grace",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "contestable",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getGuardianCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getGuardians",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -392,6 +526,25 @@ export const LegacyVaultABI = [
   },
   {
     "type": "function",
+    "name": "hasAttestedDeath",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "initialize",
     "inputs": [
       {
@@ -429,6 +582,25 @@ export const LegacyVaultABI = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isGuardian",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -526,6 +698,19 @@ export const LegacyVaultABI = [
   },
   {
     "type": "function",
+    "name": "removeGuardian",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "removeHeir",
     "inputs": [
       {
@@ -534,6 +719,13 @@ export const LegacyVaultABI = [
         "internalType": "address"
       }
     ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "revokeAttestation",
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -689,6 +881,101 @@ export const LegacyVaultABI = [
   },
   {
     "type": "event",
+    "name": "DeathAttestationRevoked",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "attestations",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalGuardians",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DeathAttestationsReset",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DeathAttested",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "attestations",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalGuardians",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DeathConfirmed",
+    "inputs": [
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GuardianAdded",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GuardianRemoved",
+    "inputs": [
+      {
+        "name": "guardian",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "HeirAdded",
     "inputs": [
       {
@@ -753,6 +1040,11 @@ export const LegacyVaultABI = [
   },
   {
     "type": "error",
+    "name": "AlreadyAttestedDeath",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "AssetAlreadyAssigned",
     "inputs": []
   },
@@ -793,6 +1085,21 @@ export const LegacyVaultABI = [
   },
   {
     "type": "error",
+    "name": "DeathAlreadyConfirmed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GuardianAlreadyRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GuardianNotRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "HeirAlreadyRegistered",
     "inputs": []
   },
@@ -823,6 +1130,11 @@ export const LegacyVaultABI = [
   },
   {
     "type": "error",
+    "name": "InvalidGuardian",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidHeir",
     "inputs": []
   },
@@ -844,6 +1156,16 @@ export const LegacyVaultABI = [
   {
     "type": "error",
     "name": "NotAssignedHeir",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotAttestedDeath",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotGuardian",
     "inputs": []
   },
   {
@@ -1058,6 +1380,18 @@ export const WorldIDVerifierAdapterABI = [
     "name": "NullifierNotRegistered",
     "inputs": []
   }
+] as const;
+
+// Errors that can bubble up through LegacyVault.registerLiveness / checkIn:
+// the verifier adapter's own errors plus the World ID router / Semaphore
+// verifier errors. Merge with LegacyVaultABI so viem can decode the revert.
+export const WorldIDRevertErrorsABI = [
+  { "type": "error", "name": "AlreadyRegistered", "inputs": [] },
+  { "type": "error", "name": "NullifierMismatch", "inputs": [] },
+  { "type": "error", "name": "NullifierNotRegistered", "inputs": [] },
+  { "type": "error", "name": "ProofInvalid", "inputs": [] },
+  { "type": "error", "name": "NonExistentRoot", "inputs": [] },
+  { "type": "error", "name": "ExpiredRoot", "inputs": [] }
 ] as const;
 
 export const ERC20AdapterABI = [
