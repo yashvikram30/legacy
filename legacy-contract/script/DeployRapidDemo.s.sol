@@ -40,8 +40,8 @@ contract DeployRapidDemoScript is Script {
         address demoVault = factory.createVault(
             WorldIDVerifierAdapter(verifierAddress),
             10, // 10 seconds check-in interval
-            5,  // 5 seconds grace period
-            10  // 10 seconds contestable window
+            5, // 5 seconds grace period
+            10 // 10 seconds contestable window
         );
         console.log("New Rapid Demo Vault Clone:", demoVault);
 

@@ -40,6 +40,25 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     uint256 public constant MIN_CONTESTABLE_WINDOW = 5;
 
     // -------------------------------------------------------------------------
+    // Guardians (death attestation / accelerated succession)
+    // -------------------------------------------------------------------------
+
+    // Trusted parties nominated by the owner who can collectively attest that
+    // the owner has died. A unanimous attestation ("death confirmed") shrinks
+    // every timelock on this vault to 1% of its nominal value — a 99% cut to
+    // the time heirs must wait to inherit.
+    uint256 public constant DEATH_ACCEL_NUMERATOR = 1;
+    uint256 public constant DEATH_ACCEL_DENOMINATOR = 100;
+
+    mapping(address guardian => bool) public isGuardian;
+    address[] private guardians;
+
+    mapping(address guardian => bool) public hasAttestedDeath;
+    uint256 public deathAttestationCount;
+    bool public deathConfirmed;
+    uint256 public deathConfirmedAt;
+
+    // -------------------------------------------------------------------------
     // Heirs
     // -------------------------------------------------------------------------
 
@@ -69,6 +88,14 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
 
     event HeirAdded(address indexed heir);
     event HeirRemoved(address indexed heir);
+
+    event GuardianAdded(address indexed guardian);
+    event GuardianRemoved(address indexed guardian);
+
+    event DeathAttested(address indexed guardian, uint256 attestations, uint256 totalGuardians);
+    event DeathAttestationRevoked(address indexed guardian, uint256 attestations, uint256 totalGuardians);
+    event DeathConfirmed(uint256 timestamp);
+    event DeathAttestationsReset();
 
     event ClaimInitiated(address indexed heir, uint256 timestamp);
 
@@ -102,6 +129,14 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     error HeirAlreadyRegistered();
     error HeirNotRegistered();
     error HeirChangesLocked();
+
+    error InvalidGuardian();
+    error GuardianAlreadyRegistered();
+    error GuardianNotRegistered();
+    error NotGuardian();
+    error AlreadyAttestedDeath();
+    error NotAttestedDeath();
+    error DeathAlreadyConfirmed();
 
     error InvalidAssetId();
     error InvalidExecutor();
@@ -163,15 +198,44 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     function getStatus() public view returns (Status) {
         uint256 elapsed = block.timestamp - lastCheckIn;
 
-        if (elapsed < checkInInterval) {
+        uint256 interval = _effectiveDuration(checkInInterval);
+        uint256 grace = _effectiveDuration(gracePeriod);
+
+        if (elapsed < interval) {
             return Status.Green;
         }
 
-        if (elapsed < checkInInterval + gracePeriod) {
+        if (elapsed < interval + grace) {
             return Status.Amber;
         }
 
         return Status.Red;
+    }
+
+    /**
+     * @notice Returns a timelock duration reduced to 1% of nominal once the
+     *         owner's death has been unanimously attested by guardians.
+     * @dev While death is unconfirmed this is the identity function, so vault
+     *      behavior is unchanged for owners who never nominate guardians.
+     */
+    function _effectiveDuration(uint256 nominal) internal view returns (uint256) {
+        if (deathConfirmed) {
+            return (nominal * DEATH_ACCEL_NUMERATOR) / DEATH_ACCEL_DENOMINATOR;
+        }
+        return nominal;
+    }
+
+    /**
+     * @notice Current effective timelock durations, accounting for any
+     *         confirmed death acceleration. Intended for front-end display.
+     */
+    function getEffectiveTimelock() external view returns (uint256 interval, uint256 grace, uint256 contestable) {
+        return
+            (
+                _effectiveDuration(checkInInterval),
+                _effectiveDuration(gracePeriod),
+                _effectiveDuration(contestableWindow)
+            );
     }
 
     // -------------------------------------------------------------------------
@@ -196,6 +260,11 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
         verifier.verifyCheckIn(address(this), owner, root, nullifierHash, proof);
 
         lastCheckIn = block.timestamp;
+
+        // A verified liveness proof is the strongest possible evidence the
+        // owner is alive: it clears any pending or confirmed death attestations
+        // and restores the vault to its nominal timelock.
+        _resetDeathAttestations();
 
         emit CheckedIn(block.timestamp);
     }
@@ -284,6 +353,151 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     }
 
     // -------------------------------------------------------------------------
+    // Guardians & death attestation
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Nominates a trusted party who may attest to the owner's death.
+     * @dev Can only happen while the vault is Green (owner is demonstrably live).
+     */
+    function addGuardian(address guardian) external onlyOwner onlyGreen {
+        if (guardian == address(0) || guardian == owner) {
+            revert InvalidGuardian();
+        }
+        if (isGuardian[guardian]) {
+            revert GuardianAlreadyRegistered();
+        }
+
+        isGuardian[guardian] = true;
+        guardians.push(guardian);
+
+        emit GuardianAdded(guardian);
+    }
+
+    /**
+     * @notice Removes a guardian from the attestation set.
+     * @dev Can only happen while the vault is Green. If the removed guardian had
+     *      an outstanding attestation it is withdrawn; removing the final
+     *      dissenting guardian can therefore complete a unanimous attestation.
+     */
+    function removeGuardian(address guardian) external onlyOwner onlyGreen {
+        if (!isGuardian[guardian]) {
+            revert GuardianNotRegistered();
+        }
+
+        isGuardian[guardian] = false;
+
+        if (hasAttestedDeath[guardian]) {
+            hasAttestedDeath[guardian] = false;
+            deathAttestationCount--;
+        }
+
+        // Remove from enumerable array using swap-and-pop.
+        uint256 length = guardians.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (guardians[i] == guardian) {
+                guardians[i] = guardians[length - 1];
+                guardians.pop();
+                break;
+            }
+        }
+
+        emit GuardianRemoved(guardian);
+
+        _maybeConfirmDeath();
+    }
+
+    /**
+     * @notice Called by a guardian to attest that the owner has died.
+     * @dev When every current guardian has attested, death is confirmed and
+     *      all timelocks collapse to 1% of nominal. Callable in any status.
+     */
+    function attestDeath() external {
+        if (!isGuardian[msg.sender]) {
+            revert NotGuardian();
+        }
+        if (hasAttestedDeath[msg.sender]) {
+            revert AlreadyAttestedDeath();
+        }
+
+        hasAttestedDeath[msg.sender] = true;
+        deathAttestationCount++;
+
+        emit DeathAttested(msg.sender, deathAttestationCount, guardians.length);
+
+        _maybeConfirmDeath();
+    }
+
+    /**
+     * @notice Withdraws a guardian's own death attestation.
+     * @dev Only possible before death is confirmed; afterwards the owner must
+     *      check in (a verified liveness proof) to reset the vault.
+     */
+    function revokeAttestation() external {
+        if (!isGuardian[msg.sender]) {
+            revert NotGuardian();
+        }
+        if (deathConfirmed) {
+            revert DeathAlreadyConfirmed();
+        }
+        if (!hasAttestedDeath[msg.sender]) {
+            revert NotAttestedDeath();
+        }
+
+        hasAttestedDeath[msg.sender] = false;
+        deathAttestationCount--;
+
+        emit DeathAttestationRevoked(msg.sender, deathAttestationCount, guardians.length);
+    }
+
+    /**
+     * @notice Returns all currently registered guardians.
+     */
+    function getGuardians() external view returns (address[] memory) {
+        return guardians;
+    }
+
+    /**
+     * @notice Returns the number of currently registered guardians.
+     */
+    function getGuardianCount() external view returns (uint256) {
+        return guardians.length;
+    }
+
+    /**
+     * @dev Confirms death once every current guardian has attested. No-op if
+     *      already confirmed or if there are no guardians (a vault with no
+     *      guardians can never be accelerated).
+     */
+    function _maybeConfirmDeath() internal {
+        if (!deathConfirmed && guardians.length > 0 && deathAttestationCount >= guardians.length) {
+            deathConfirmed = true;
+            deathConfirmedAt = block.timestamp;
+            emit DeathConfirmed(block.timestamp);
+        }
+    }
+
+    /**
+     * @dev Clears all attestation state and lifts any acceleration.
+     */
+    function _resetDeathAttestations() internal {
+        if (deathAttestationCount == 0 && !deathConfirmed) {
+            return;
+        }
+
+        uint256 length = guardians.length;
+        for (uint256 i = 0; i < length; i++) {
+            hasAttestedDeath[guardians[i]] = false;
+        }
+
+        deathAttestationCount = 0;
+        deathConfirmed = false;
+        deathConfirmedAt = 0;
+
+        emit DeathAttestationsReset();
+    }
+
+    // -------------------------------------------------------------------------
     // Asset Allocation
     // -------------------------------------------------------------------------
 
@@ -365,7 +579,7 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
             revert ClaimNotContestable();
         }
 
-        if (block.timestamp < claimInitiatedAt[msg.sender] + contestableWindow) {
+        if (block.timestamp < claimInitiatedAt[msg.sender] + _effectiveDuration(contestableWindow)) {
             revert ContestableWindowNotElapsed();
         }
 
