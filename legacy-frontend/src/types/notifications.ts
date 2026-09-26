@@ -1,0 +1,51 @@
+export type AlertThreshold = "7d" | "3d" | "24h" | "amber" | "claim_initiated" | "test";
+
+export type NotificationChannel = "email" | "push" | "telegram";
+
+export interface AlertLogEntry {
+  id: string;
+  threshold: AlertThreshold;
+  title: string;
+  message: string;
+  timestamp: number;
+  channel: NotificationChannel | "all";
+  success: boolean;
+  error?: string;
+}
+
+export interface VaultNotificationSubscription {
+  vaultAddress: `0x${string}`;
+  ownerAddress: `0x${string}`;
+  email?: string;
+  emailVerified?: boolean;
+  telegramChatId?: string;
+  telegramUsername?: string;
+  pushEnabled?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  lastAlertSent?: {
+    threshold: AlertThreshold;
+    timestamp: number;
+    cycleEpoch: number; // correlates with contract lastCheckIn
+  };
+  recentAlerts?: AlertLogEntry[];
+}
+
+export interface SubscribeRequest {
+  vaultAddress: `0x${string}`;
+  ownerAddress: `0x${string}`;
+  email?: string;
+  pushEnabled?: boolean;
+  telegramChatId?: string;
+}
+
+export interface SendTestAlertRequest {
+  vaultAddress: `0x${string}`;
+  channel?: NotificationChannel | "all";
+}
+
+export interface ClaimAlertRequest {
+  vaultAddress: `0x${string}`;
+  heirAddress: `0x${string}`;
+  txHash?: `0x${string}`;
+}

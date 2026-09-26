@@ -1,0 +1,344 @@
+"use client";
+
+import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { getAbiItem } from "viem";
+import { useAccount, usePublicClient, useReadContracts } from "wagmi";
+import { VaultStatus } from "@/lib/constants";
+import { LegacyVaultABI } from "@/lib/contracts/abis";
+
+interface VaultDashboardHubProps {
+  ownedVaults: readonly `0x${string}`[];
+  isLoadingOwned: boolean;
+  onManageVault: (vault: `0x${string}`) => void;
+  onCreateVault: () => void;
+  isCreatingVault: boolean;
+  isWrongChain: boolean;
+  onSwitchChain: () => void;
+}
+
+interface HeirVaultEntry {
+  vault: `0x${string}`;
+  status: VaultStatus;
+  owner: `0x${string}`;
+}
+
+const heirAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "HeirAdded" });
+
+function statusLabel(status: VaultStatus | null) {
+  if (status === VaultStatus.Green) return { text: "GREEN", color: "var(--status-green)" };
+  if (status === VaultStatus.Amber) return { text: "AMBER", color: "var(--status-amber)" };
+  if (status === VaultStatus.Red) return { text: "RED", color: "var(--status-red)" };
+  return { text: "…", color: "var(--text-secondary)" };
+}
+
+function StatusDot({ status }: { status: VaultStatus | null }) {
+  const { text, color } = statusLabel(status);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          backgroundColor: color,
+          boxShadow: status !== null ? `0 0 6px ${color}` : "none",
+          flexShrink: 0,
+        }}
+      />
+      <span className="font-data" style={{ fontSize: "0.6875rem", fontWeight: 700, letterSpacing: "0.06em", color }}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// Stagger caps at 8 cards worth of delay so large lists don't drag out the entrance.
+const MAX_STAGGER_INDEX = 8;
+const STAGGER_STEP_MS = 40;
+
+function cardStaggerStyle(index: number): React.CSSProperties {
+  const delay = Math.min(index, MAX_STAGGER_INDEX) * STAGGER_STEP_MS;
+  return { animationDelay: `${delay}ms` };
+}
+
+function VaultCard({
+  vaultAddress,
+  status,
+  metaLabel,
+  metaValue,
+  ctaLabel,
+  onClick,
+  urgent,
+  style,
+}: {
+  vaultAddress: `0x${string}`;
+  status: VaultStatus | null;
+  metaLabel: string;
+  metaValue: string;
+  ctaLabel: string;
+  onClick: () => void;
+  urgent?: boolean;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="vault-card animate-fade-up"
+      style={{
+        textAlign: "left",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        padding: "18px 20px",
+        backgroundColor: urgent ? "rgba(193, 80, 63, 0.06)" : "rgba(255, 255, 255, 0.02)",
+        border: `1px solid ${urgent ? "var(--status-red)" : "rgba(255, 255, 255, 0.1)"}`,
+        cursor: "pointer",
+        width: "100%",
+        borderRadius: 0,
+        ...style,
+      }}
+    >
+      <StatusDot status={status} />
+      <div className="font-data" style={{ fontSize: "0.8125rem", color: "#ffffff" }}>
+        {vaultAddress.slice(0, 10)}…{vaultAddress.slice(-6)}
+      </div>
+      <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+        {metaLabel}: <span style={{ color: "var(--text-primary)" }}>{metaValue}</span>
+      </div>
+      <div style={{ fontSize: "0.75rem", color: "var(--accent-brass)", fontWeight: 600, marginTop: 2 }}>
+        {ctaLabel} →
+      </div>
+    </button>
+  );
+}
+
+function CardSkeleton() {
+  return (
+    <div className="animate-fade-up" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "18px 20px", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+      <div className="skeleton-shimmer" style={{ width: 60, height: 12 }} />
+      <div className="skeleton-shimmer" style={{ width: "70%", height: 16 }} />
+      <div className="skeleton-shimmer" style={{ width: "40%", height: 12 }} />
+    </div>
+  );
+}
+
+export function VaultDashboardHub({
+  ownedVaults,
+  isLoadingOwned,
+  onManageVault,
+  onCreateVault,
+  isCreatingVault,
+  isWrongChain,
+  onSwitchChain,
+}: VaultDashboardHubProps) {
+  const { address } = useAccount();
+  const publicClient = usePublicClient();
+  const router = useRouter();
+
+  // ── Owned vaults: live status + heir count via multicall ──────────
+  const ownedContracts = ownedVaults.flatMap((v) => [
+    { address: v, abi: LegacyVaultABI, functionName: "getStatus" as const },
+    { address: v, abi: LegacyVaultABI, functionName: "getHeirCount" as const },
+  ]);
+
+  const { data: ownedResults } = useReadContracts({
+    contracts: ownedContracts,
+    query: { enabled: ownedVaults.length > 0, refetchInterval: 5000 },
+  });
+
+  const ownedCards = ownedVaults.map((v, i) => {
+    const statusRes = ownedResults?.[i * 2];
+    const heirCountRes = ownedResults?.[i * 2 + 1];
+    return {
+      vault: v,
+      status: statusRes?.status === "success" ? (Number(statusRes.result) as VaultStatus) : null,
+      heirCount: heirCountRes?.status === "success" ? Number(heirCountRes.result) : null,
+    };
+  });
+
+  // ── Heir-side discovery: scan HeirAdded logs for this address across
+  // every vault, then confirm current membership (handles removals) ──
+  const [heirVaults, setHeirVaults] = useState<HeirVaultEntry[]>([]);
+  const [isLoadingHeirVaults, setIsLoadingHeirVaults] = useState(false);
+  const [heirScanError, setHeirScanError] = useState<string | null>(null);
+
+  const scanHeirVaults = useCallback(async () => {
+    if (!publicClient || !address || !heirAddedEvent) return;
+    try {
+      setIsLoadingHeirVaults(true);
+      setHeirScanError(null);
+      const logs = await publicClient.getLogs({
+        event: heirAddedEvent,
+        args: { heir: address },
+        fromBlock: 0n,
+        toBlock: "latest",
+      });
+      const candidates = Array.from(new Set(logs.map((l) => l.address)));
+
+      const results = await Promise.all(
+        candidates.map(async (vault) => {
+          const [isHeirNow, statusNow, ownerNow] = await Promise.all([
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isHeir", args: [address] }),
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
+            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
+          ]);
+          return isHeirNow ? { vault, status: Number(statusNow) as VaultStatus, owner: ownerNow as `0x${string}` } : null;
+        })
+      );
+
+      setHeirVaults(results.filter((r): r is HeirVaultEntry => r !== null));
+    } catch (err) {
+      console.error("❌ [Dashboard] Failed to scan for beneficiary vaults:", err);
+      setHeirScanError("Could not scan for beneficiary vaults automatically. Your RPC endpoint may restrict this type of query — use manual lookup below instead.");
+    } finally {
+      setIsLoadingHeirVaults(false);
+    }
+  }, [publicClient, address]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async log scan, not a sync setState
+    scanHeirVaults();
+  }, [scanHeirVaults]);
+
+  const hasOwned = ownedVaults.length > 0;
+
+  return (
+    <div style={{ padding: "32px", display: "flex", flexDirection: "column", gap: "40px" }}>
+      {/* Header row: title + CTA, always visible, no scrolling required */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <h1 className="section-title" style={{ fontSize: "1.625rem", marginBottom: "6px" }}>
+            VAULT DASHBOARD
+          </h1>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", maxWidth: 520, lineHeight: 1.5 }}>
+            Vaults you own, and vaults where you&apos;re a designated beneficiary.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={isWrongChain ? onSwitchChain : onCreateVault}
+          disabled={isCreatingVault}
+          className={isWrongChain ? "btn-chain-wrong" : "btn-hero-action"}
+          style={{ marginTop: 0, padding: "12px 24px", flexShrink: 0 }}
+        >
+          <span>
+            {isCreatingVault ? "Deploying…" : isWrongChain ? "Switch Network" : "+ Create New Vault"}
+          </span>
+          {!isCreatingVault && !isWrongChain && <span className="arrow-icon" aria-hidden="true">→</span>}
+        </button>
+      </div>
+
+      {/* ── Your Vaults ─────────────────────────────────────────── */}
+      <section>
+        <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
+          Your Vaults {hasOwned ? `(${ownedVaults.length})` : ""}
+        </h2>
+
+        {isLoadingOwned ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+            <CardSkeleton />
+            <CardSkeleton />
+          </div>
+        ) : !hasOwned ? (
+          <div
+            style={{
+              padding: "28px 24px",
+              border: "1px dashed rgba(255, 255, 255, 0.15)",
+              backgroundColor: "rgba(255, 255, 255, 0.01)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "16px",
+            }}
+          >
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0, lineHeight: 1.5, maxWidth: 420 }}>
+              You haven&apos;t created a succession vault yet. Deploy one to start protecting assets with automated World ID liveness checks.
+            </p>
+            <button
+              type="button"
+              onClick={isWrongChain ? onSwitchChain : onCreateVault}
+              disabled={isCreatingVault}
+              className={isWrongChain ? "btn-chain-wrong" : "btn-brass"}
+              style={{ padding: "10px 20px", fontSize: "0.8125rem", borderRadius: 0, flexShrink: 0 }}
+            >
+              {isCreatingVault ? "Deploying…" : isWrongChain ? "Switch Network" : "+ Create Vault"}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+            {ownedCards.map((card, i) => (
+              <VaultCard
+                key={card.vault}
+                vaultAddress={card.vault}
+                status={card.status}
+                metaLabel="Heirs"
+                metaValue={card.heirCount === null ? "…" : String(card.heirCount)}
+                ctaLabel="Manage"
+                onClick={() => onManageVault(card.vault)}
+                style={cardStaggerStyle(i)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Vaults You're a Beneficiary Of ──────────────────────── */}
+      <section>
+        <h2 style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: "16px" }}>
+          Vaults You&apos;re a Beneficiary Of {heirVaults.length > 0 ? `(${heirVaults.length})` : ""}
+        </h2>
+
+        {isLoadingHeirVaults ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+            <CardSkeleton />
+          </div>
+        ) : heirVaults.length === 0 ? (
+          <div
+            style={{
+              padding: "24px",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              backgroundColor: "rgba(255, 255, 255, 0.01)",
+            }}
+          >
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", margin: 0, lineHeight: 1.5 }}>
+              No succession vaults currently name you as a beneficiary.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+            {heirVaults.map((entry, i) => (
+              <VaultCard
+                key={entry.vault}
+                vaultAddress={entry.vault}
+                status={entry.status}
+                metaLabel="Owner"
+                metaValue={`${entry.owner.slice(0, 6)}…${entry.owner.slice(-4)}`}
+                ctaLabel="View & Claim"
+                onClick={() => router.push(`/claim?v=${entry.vault}`)}
+                urgent={entry.status === VaultStatus.Red}
+                style={cardStaggerStyle(i)}
+              />
+            ))}
+          </div>
+        )}
+
+        {heirScanError && (
+          <p style={{ color: "var(--status-amber)", fontSize: "0.75rem", marginTop: "10px", lineHeight: 1.5 }}>
+            {heirScanError}
+          </p>
+        )}
+
+        <p style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginTop: "10px" }}>
+          Know a vault address that isn&apos;t showing here?{" "}
+          <Link href="/claim" style={{ color: "var(--accent-brass)" }}>
+            Look it up manually →
+          </Link>
+        </p>
+      </section>
+    </div>
+  );
+}
