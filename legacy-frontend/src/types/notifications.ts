@@ -1,6 +1,6 @@
-export type AlertThreshold = "7d" | "3d" | "24h" | "amber" | "claim_initiated" | "test";
+export type AlertThreshold = "7d" | "3d" | "24h" | "amber" | "claim_initiated" | "vault_created" | "test";
 
-export type NotificationChannel = "email" | "push" | "telegram";
+export type NotificationChannel = "email" | "push";
 
 export interface AlertLogEntry {
   id: string;
@@ -18,8 +18,6 @@ export interface VaultNotificationSubscription {
   ownerAddress: `0x${string}`;
   email?: string;
   emailVerified?: boolean;
-  telegramChatId?: string;
-  telegramUsername?: string;
   pushEnabled?: boolean;
   createdAt: number;
   updatedAt: number;
@@ -36,7 +34,6 @@ export interface SubscribeRequest {
   ownerAddress: `0x${string}`;
   email?: string;
   pushEnabled?: boolean;
-  telegramChatId?: string;
 }
 
 export interface SendTestAlertRequest {
