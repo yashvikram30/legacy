@@ -11,6 +11,24 @@ import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { ClaimPortalSkeleton } from "@/components/Skeleton";
 import { useMounted } from "@/hooks/useMounted";
 import { StatusLamp } from "@/components/StatusLamp";
+import { PipelineVisualizer, type PipelineStage } from "@/components/PipelineVisualizer";
+import { SealedMessageHeirPanel } from "@/components/SealedMessageHeirPanel";
+import { GuardianAttestationPanel } from "@/components/GuardianAttestationPanel";
+
+const SUCCESSION_STAGES: PipelineStage[] = [
+  { key: "liveness", label: "Active Liveness", hint: "Owner checking in", color: "var(--status-green)" },
+  { key: "grace", label: "Grace Period", hint: "Cadence missed", color: "var(--status-amber)" },
+  { key: "contestation", label: "Heir Contestation", hint: "Claim window", color: "var(--status-red)" },
+  { key: "distribution", label: "Asset Distribution", hint: "Transfers unlocked", color: "var(--status-green)" },
+];
+
+function successionStageIndex(vaultStatus: VaultStatus | null, claimStatus: ClaimStatus): number {
+  if (claimStatus === ClaimStatus.Claimed) return 3;
+  if (claimStatus === ClaimStatus.Contestable) return 2;
+  if (vaultStatus === VaultStatus.Red) return 2;
+  if (vaultStatus === VaultStatus.Amber) return 1;
+  return 0;
+}
 
 interface HeirAllocation {
   assetId: `0x${string}`;
@@ -717,6 +735,24 @@ export default function HeirClaimPortal() {
                 />
               </div>
 
+              {/* Succession lifecycle pipeline — where this vault sits in the
+                  Active Liveness → Grace → Contestation → Distribution flow. */}
+              <div
+                style={{
+                  padding: "24px 32px",
+                  borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+                  background: "rgba(255, 255, 255, 0.01)",
+                }}
+              >
+                <span className="section-tag" style={{ margin: "0 0 16px", display: "block" }}>
+                  [ SUCCESSION LIFECYCLE ]
+                </span>
+                <PipelineVisualizer
+                  stages={SUCCESSION_STAGES}
+                  currentIndex={successionStageIndex(vaultStatus, claimStatus)}
+                />
+              </div>
+
               {/* Telemetry Matrix Strip */}
               <div className="hero-telemetry-strip" style={{ marginTop: 0, borderTop: "none", borderLeft: "none", borderRight: "none" }}>
                 <div className="telemetry-cell">
@@ -912,6 +948,18 @@ export default function HeirClaimPortal() {
                   </div>
                 )}
               </div>
+
+              {/* Guardian death-attestation vote (accelerates inheritance). */}
+              <GuardianAttestationPanel vaultAddress={vaultAddress} viewerAddress={address} />
+
+              {/* Encrypted message the owner sealed to this heir. */}
+              {address && (
+                <SealedMessageHeirPanel
+                  vaultAddress={vaultAddress}
+                  heirAddress={address}
+                  isHeir={isHeir}
+                />
+              )}
             </>
           )}
 

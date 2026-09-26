@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useAccount, useReadContract, useWriteContract, usePublicClient, useChainId, useSwitchChain } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
@@ -9,13 +9,17 @@ import {
   VaultStatus,
   worldChainSepolia,
 } from "@/lib/constants";
-import { LegacyVaultFactoryABI, LegacyVaultABI } from "@/lib/contracts/abis";
+import { BaseError, ContractFunctionRevertedError } from "viem";
+import { LegacyVaultFactoryABI, LegacyVaultABI, WorldIDRevertErrorsABI } from "@/lib/contracts/abis";
 import { VaultDashboardHub } from "@/components/VaultDashboardHub";
 import { VaultConfigRail } from "@/components/VaultConfigRail";
 import { LivenessPanel } from "@/components/LivenessPanel";
+import { PipelineVisualizer, type PipelineStage } from "@/components/PipelineVisualizer";
+import { SealedMessagePanel } from "@/components/SealedMessagePanel";
 import { ActivityLog } from "@/components/ActivityLog";
 import { CheckInModal } from "@/components/CheckInModal";
 import { HeirList } from "@/components/HeirList";
+import { GuardianList } from "@/components/GuardianList";
 import { AssetList, AssetRecord } from "@/components/AssetList";
 import { VaultParameters } from "@/components/VaultParameters";
 import { WatchdogAlertPanel } from "@/components/WatchdogAlertPanel";
@@ -27,7 +31,64 @@ import {
   VaultDeploymentModal,
   DeploymentStage,
 } from "@/components/VaultDeploymentModal";
+import { VaultCreationModal } from "@/components/VaultCreationModal";
+import {
+  fetchVaultMeta,
+  saveVaultName,
+  saveHeirName,
+  removeHeirName as removeHeirNameMeta,
+  heirNameMap,
+  type VaultMetaRecord,
+} from "@/lib/vault-meta/client";
 import { useMounted } from "@/hooks/useMounted";
+
+const LIFECYCLE_STAGES: PipelineStage[] = [
+  { key: "liveness", label: "Active Liveness", hint: "You're checking in", color: "var(--status-green)" },
+  { key: "grace", label: "Grace Period", hint: "Cadence missed", color: "var(--status-amber)" },
+  { key: "contestation", label: "Heir Contestation", hint: "Claims unlock", color: "var(--status-red)" },
+  { key: "distribution", label: "Asset Distribution", hint: "Transfers execute", color: "var(--status-green)" },
+];
+
+function vaultStageIndex(status: VaultStatus): number {
+  if (status === VaultStatus.Amber) return 1;
+  if (status === VaultStatus.Red) return 2;
+  return 0;
+}
+
+// LegacyVault ABI plus the World ID errors that bubble up through
+// registerLiveness / checkIn, so simulated reverts decode to a named error.
+const LivenessCallABI = [...LegacyVaultABI, ...WorldIDRevertErrorsABI] as const;
+
+const LIVENESS_REVERT_MESSAGES: Record<string, string> = {
+  ProofInvalid:
+    "ProofInvalid: The World ID proof was rejected by this vault's verifier. Vaults bound to the production World ID router reject staging/simulator proofs. Deploy a new vault on the testnet verifier.",
+  NonExistentRoot: "NonExistentRoot: The proof's Merkle root is unknown to this vault's World ID verifier.",
+  ExpiredRoot: "ExpiredRoot: The proof's Merkle root has expired. Generate a fresh World ID proof.",
+  LivenessAlreadyRegistered: "LivenessAlreadyRegistered: This vault already has an enrolled identity.",
+  AlreadyRegistered: "AlreadyRegistered: The verifier already holds a nullifier for this vault.",
+  LivenessNotRegistered: "LivenessNotRegistered: Register liveness before checking in.",
+  NotOwner: "NotOwner: Only the vault owner can submit liveness proofs.",
+};
+
+// Simulates a liveness call so a bad proof fails before broadcast (the real
+// tx uses a fixed gas limit, which skips estimation) and the revert is named.
+async function assertLivenessCallSucceeds(
+  simulate: () => Promise<unknown>,
+  functionName: string
+): Promise<void> {
+  try {
+    await simulate();
+  } catch (err: unknown) {
+    const revert =
+      err instanceof BaseError ? err.walk((e) => e instanceof ContractFunctionRevertedError) : null;
+    if (revert instanceof ContractFunctionRevertedError) {
+      const name = revert.data?.errorName ?? revert.signature ?? "unknown";
+      console.error(`❌ [Vault] ${functionName} simulation reverted:`, name, err);
+      throw new Error(LIVENESS_REVERT_MESSAGES[name] ?? `${functionName} would revert on-chain: ${name}`);
+    }
+    throw err;
+  }
+}
 
 export default function VaultDashboardPage() {
   const mounted = useMounted();
@@ -45,7 +106,7 @@ export default function VaultDashboardPage() {
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
   const [orchestratedMessage, setOrchestratedMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"heirs" | "assets" | "parameters" | "activity" | "watchdog">("heirs");
+  const [activeTab, setActiveTab] = useState<"heirs" | "guardians" | "assets" | "parameters" | "activity" | "watchdog" | "message">("heirs");
   const [assetList, setAssetList] = useState<AssetRecord[]>([]);
 
   // Deployment state
@@ -54,6 +115,12 @@ export default function VaultDashboardPage() {
   const [deployTxHash, setDeployTxHash] = useState<string | null>(null);
   const [deployedVaultAddr, setDeployedVaultAddr] = useState<string | null>(null);
   const [deployErrorMessage, setDeployErrorMessage] = useState<string | null>(null);
+
+  // Web2 naming flow: the "name your vault" step precedes deployment, and the
+  // chosen name is persisted off-chain once the vault address is known.
+  const [isNamingVault, setIsNamingVault] = useState(false);
+  const [pendingVaultName, setPendingVaultName] = useState<string>("");
+  const [vaultMeta, setVaultMeta] = useState<VaultMetaRecord | null>(null);
 
   const handleSelectVault = (vaultAddr: `0x${string}`) => {
     setSelectedVaultState(vaultAddr);
@@ -124,6 +191,27 @@ export default function VaultDashboardPage() {
     query: { enabled: Boolean(selectedVault) },
   });
 
+  const { data: rawGuardians, refetch: refetchGuardians } = useReadContract({
+    address: selectedVault ?? undefined,
+    abi: LegacyVaultABI,
+    functionName: "getGuardians",
+    query: { enabled: Boolean(selectedVault), refetchInterval: 3000 },
+  });
+
+  const { data: deathAttestationCountRaw, refetch: refetchAttestations } = useReadContract({
+    address: selectedVault ?? undefined,
+    abi: LegacyVaultABI,
+    functionName: "deathAttestationCount",
+    query: { enabled: Boolean(selectedVault), refetchInterval: 3000 },
+  });
+
+  const { data: deathConfirmedRaw, refetch: refetchDeathConfirmed } = useReadContract({
+    address: selectedVault ?? undefined,
+    abi: LegacyVaultABI,
+    functionName: "deathConfirmed",
+    query: { enabled: Boolean(selectedVault), refetchInterval: 3000 },
+  });
+
   const { data: vaultOwner } = useReadContract({
     address: selectedVault ?? undefined,
     abi: LegacyVaultABI,
@@ -151,6 +239,28 @@ export default function VaultDashboardPage() {
       ? optimisticLiveness.value
       : Boolean(livenessRegisteredRaw);
   const heirs = (rawHeirs as readonly `0x${string}`[]) || [];
+  const heirNames = heirNameMap(vaultMeta);
+  const vaultName = vaultMeta?.vaultName;
+  const guardians = (rawGuardians as readonly `0x${string}`[]) || [];
+  const deathAttestationCount = deathAttestationCountRaw !== undefined ? Number(deathAttestationCountRaw) : 0;
+  const deathConfirmed = Boolean(deathConfirmedRaw);
+
+  // Load off-chain metadata (vault name + beneficiary names) whenever the
+  // selected vault changes. Names are best-effort; a failure just falls back
+  // to addresses.
+  const loadVaultMeta = useCallback(async (vault: `0x${string}`) => {
+    const meta = await fetchVaultMeta(vault);
+    setVaultMeta(meta);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedVault) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale meta on deselect
+      setVaultMeta(null);
+      return;
+    }
+    loadVaultMeta(selectedVault);
+  }, [selectedVault, loadVaultMeta]);
 
   const refetchAll = useCallback(() => {
     refetchStatus();
@@ -160,8 +270,11 @@ export default function VaultDashboardPage() {
     refetchContestable();
     refetchLiveness();
     refetchHeirs();
+    refetchGuardians();
+    refetchAttestations();
+    refetchDeathConfirmed();
     refetchVerifier();
-  }, [refetchStatus, refetchLastCheckIn, refetchInterval, refetchGrace, refetchContestable, refetchLiveness, refetchHeirs, refetchVerifier]);
+  }, [refetchStatus, refetchLastCheckIn, refetchInterval, refetchGrace, refetchContestable, refetchLiveness, refetchHeirs, refetchGuardians, refetchAttestations, refetchDeathConfirmed, refetchVerifier]);
 
   // ── Handlers ──────────────────────────────────────────────────────
   const handleCheckInSuccess = (message: string) => {
@@ -185,6 +298,17 @@ export default function VaultDashboardPage() {
         nullifierHash: nullifierHash.toString(),
         proofLength: proof.length,
       });
+      await assertLivenessCallSucceeds(
+        () =>
+          publicClient.simulateContract({
+            account: address,
+            address: selectedVault,
+            abi: LivenessCallABI,
+            functionName: "checkIn",
+            args: [root, nullifierHash, proof],
+          }),
+        "checkIn"
+      );
       const hash = await writeContractAsync({
         chainId: worldChainSepolia.id,
         address: selectedVault,
@@ -197,7 +321,7 @@ export default function VaultDashboardPage() {
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status === "reverted") {
         console.error("❌ [Vault] checkIn transaction reverted on-chain:", receipt);
-        throw new Error("Check-in transaction reverted on-chain (NullifierMismatch): The submitted World ID nullifier does not match the identity originally registered for this vault.");
+        throw new Error(`Check-in transaction reverted on-chain (tx ${hash}).`);
       }
       console.log("✅ [Vault] checkIn confirmed on-chain");
     } catch (err: unknown) {
@@ -219,6 +343,17 @@ export default function VaultDashboardPage() {
         nullifierHash: nullifierHash.toString(),
         proofLength: proof.length,
       });
+      await assertLivenessCallSucceeds(
+        () =>
+          publicClient.simulateContract({
+            account: address,
+            address: selectedVault,
+            abi: LivenessCallABI,
+            functionName: "registerLiveness",
+            args: [root, nullifierHash, proof],
+          }),
+        "registerLiveness"
+      );
       const hash = await writeContractAsync({
         chainId: worldChainSepolia.id,
         address: selectedVault,
@@ -231,7 +366,7 @@ export default function VaultDashboardPage() {
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status === "reverted") {
         console.error("❌ [Vault] registerLiveness transaction reverted on-chain:", receipt);
-        throw new Error("Liveness registration reverted on-chain: This vault may already have an enrolled identity.");
+        throw new Error(`Liveness registration reverted on-chain (tx ${hash}).`);
       }
       if (selectedVault) {
         setOptimisticLiveness({ vault: selectedVault, value: true });
@@ -268,10 +403,10 @@ export default function VaultDashboardPage() {
     }
   };
 
-  const handleAddHeir = async (heir: `0x${string}`) => {
+  const handleAddHeir = async (heir: `0x${string}`, name: string) => {
     if (!publicClient || !selectedVault) throw new Error("Client or vault unavailable");
     try {
-      console.log("👉 [Vault] Calling addHeir:", { vault: selectedVault, heir });
+      console.log("👉 [Vault] Calling addHeir:", { vault: selectedVault, heir, name });
       // Pre-flight check: ensure vault is Green before attempting transaction
       const currentStatus = await publicClient.readContract({
         address: selectedVault,
@@ -298,6 +433,11 @@ export default function VaultDashboardPage() {
       await publicClient.waitForTransactionReceipt({ hash });
       console.log("✅ [Vault] addHeir confirmed on-chain");
       refetchHeirs();
+      // Persist the beneficiary's friendly name off-chain (best-effort).
+      if (address && name.trim()) {
+        await saveHeirName(selectedVault, address, heir, name.trim());
+        await loadVaultMeta(selectedVault);
+      }
     } catch (err: unknown) {
       console.error("❌ [Vault] addHeir error details:", err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -342,6 +482,9 @@ export default function VaultDashboardPage() {
       await publicClient.waitForTransactionReceipt({ hash });
       console.log("✅ [Vault] removeHeir confirmed on-chain");
       refetchHeirs();
+      // Drop the stored name too, so a re-added address doesn't inherit a stale label.
+      await removeHeirNameMeta(selectedVault, heir);
+      await loadVaultMeta(selectedVault);
     } catch (err: unknown) {
       console.error("❌ [Vault] removeHeir error details:", err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -352,6 +495,79 @@ export default function VaultDashboardPage() {
         msg.includes("0x12c1")
       ) {
         throw new Error("Cannot remove heir: Vault is not Green. Heir modifications are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+      }
+      throw err;
+    }
+  };
+
+  const handleAddGuardian = async (guardian: `0x${string}`) => {
+    if (!publicClient || !selectedVault) throw new Error("Client or vault unavailable");
+    try {
+      const currentStatus = await publicClient.readContract({
+        address: selectedVault,
+        abi: LegacyVaultABI,
+        functionName: "getStatus",
+      });
+      if (Number(currentStatus) !== 0) {
+        throw new Error(
+          `Cannot add guardian: Vault is currently in ${
+            Number(currentStatus) === 1 ? "Amber" : "Red"
+          } status. Guardian changes are locked while the vault is not Green. Perform a World ID check-in to restore Green status first.`
+        );
+      }
+      const hash = await writeContractAsync({
+        chainId: worldChainSepolia.id,
+        address: selectedVault,
+        abi: LegacyVaultABI,
+        functionName: "addGuardian",
+        args: [guardian],
+        gas: 250000n,
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      refetchGuardians();
+      refetchAttestations();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("HeirChangesLocked") || msg.toLowerCase().includes("gas limit") || msg.includes("0x12c1")) {
+        throw new Error("Cannot add guardian: Vault is not Green. Guardian changes are locked while the vault is Amber or Red.");
+      }
+      if (msg.includes("InvalidGuardian")) throw new Error("Invalid guardian: cannot be the zero address or the owner.");
+      if (msg.includes("GuardianAlreadyRegistered")) throw new Error("That address is already a guardian.");
+      throw err;
+    }
+  };
+
+  const handleRemoveGuardian = async (guardian: `0x${string}`) => {
+    if (!publicClient || !selectedVault) throw new Error("Client or vault unavailable");
+    try {
+      const currentStatus = await publicClient.readContract({
+        address: selectedVault,
+        abi: LegacyVaultABI,
+        functionName: "getStatus",
+      });
+      if (Number(currentStatus) !== 0) {
+        throw new Error(
+          `Cannot remove guardian: Vault is currently in ${
+            Number(currentStatus) === 1 ? "Amber" : "Red"
+          } status. Guardian changes are locked while the vault is not Green.`
+        );
+      }
+      const hash = await writeContractAsync({
+        chainId: worldChainSepolia.id,
+        address: selectedVault,
+        abi: LegacyVaultABI,
+        functionName: "removeGuardian",
+        args: [guardian],
+        gas: 200000n,
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      refetchGuardians();
+      refetchAttestations();
+      refetchDeathConfirmed();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("HeirChangesLocked") || msg.toLowerCase().includes("gas limit") || msg.includes("0x12c1")) {
+        throw new Error("Cannot remove guardian: Vault is not Green. Guardian changes are locked while the vault is Amber or Red.");
       }
       throw err;
     }
@@ -546,13 +762,21 @@ export default function VaultDashboardPage() {
       }
       setDeployStage("syncing");
       const { data: updatedVaults } = await refetchVaults();
+      let resolvedVault: `0x${string}` | null = null;
       if (newVaultAddr) {
+        resolvedVault = newVaultAddr;
         setDeployedVaultAddr(newVaultAddr);
         handleSelectVault(newVaultAddr);
       } else if (updatedVaults && updatedVaults.length > 0) {
         const fallbackVault = updatedVaults[updatedVaults.length - 1];
+        resolvedVault = fallbackVault;
         setDeployedVaultAddr(fallbackVault);
         handleSelectVault(fallbackVault);
+      }
+      // Persist the name the owner gave this vault off-chain (best-effort).
+      if (resolvedVault && address && pendingVaultName.trim()) {
+        await saveVaultName(resolvedVault, address, pendingVaultName.trim());
+        await loadVaultMeta(resolvedVault);
       }
       refetchAll();
       setDeployStage("success");
@@ -570,6 +794,23 @@ export default function VaultDashboardPage() {
       }
       setDeployStage("error");
     }
+  };
+
+  // Web2 flow: open the naming step first; deployment starts only once the
+  // owner has named the vault and confirmed.
+  const openVaultCreation = () => {
+    if (isWrongChain) {
+      switchChain?.({ chainId: worldChainSepolia.id });
+      return;
+    }
+    setDeployErrorMessage(null);
+    setIsNamingVault(true);
+  };
+
+  const handleConfirmVaultName = (name: string) => {
+    setPendingVaultName(name);
+    setIsNamingVault(false);
+    handleCreateVault();
   };
 
   // ── Safe SSR & Mounting State ─────────────────────────────────────
@@ -700,7 +941,7 @@ export default function VaultDashboardPage() {
               ownedVaults={userVaults || []}
               isLoadingOwned={isVaultsLoading}
               onManageVault={handleSelectVault}
-              onCreateVault={handleCreateVault}
+              onCreateVault={openVaultCreation}
               isCreatingVault={isCreatingVault}
               isWrongChain={Boolean(isWrongChain)}
               onSwitchChain={() => switchChain?.({ chainId: worldChainSepolia.id })}
@@ -734,9 +975,33 @@ export default function VaultDashboardPage() {
                   >
                     <span aria-hidden="true">←</span> All Vaults
                   </button>
-                  <span className="font-data" style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                    {selectedVault.slice(0, 10)}…{selectedVault.slice(-6)}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                    {vaultName ? (
+                      <>
+                        <span
+                          style={{
+                            fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
+                            fontSize: "0.9375rem",
+                            color: "#ffffff",
+                            letterSpacing: "0.03em",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: "40vw",
+                          }}
+                        >
+                          {vaultName}
+                        </span>
+                        <span className="font-data" style={{ fontSize: "0.6875rem", color: "var(--text-secondary)", opacity: 0.7 }}>
+                          {selectedVault.slice(0, 6)}…{selectedVault.slice(-4)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-data" style={{ fontSize: "0.875rem", color: "#ffffff" }}>
+                        {selectedVault.slice(0, 10)}…{selectedVault.slice(-6)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Orchestrated message banner */}
@@ -806,12 +1071,47 @@ export default function VaultDashboardPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={isWrongChain ? () => switchChain?.({ chainId: worldChainSepolia.id }) : handleCreateVault}
+                      onClick={openVaultCreation}
                       disabled={isCreatingVault}
                       className="btn-brass"
                       style={{ fontSize: "0.75rem", padding: "6px 14px", borderRadius: 0, whiteSpace: "nowrap" }}
                     >
                       {isCreatingVault ? "Deploying…" : "+ Deploy Testnet Vault"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Guardian death-confirmation banner: unanimous attestation
+                    has collapsed this vault's timelocks by 99%. */}
+                {deathConfirmed && (
+                  <div
+                    style={{
+                      backgroundColor: "rgba(193, 80, 63, 0.15)",
+                      borderBottom: "1px solid var(--status-red)",
+                      padding: "14px 32px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span className="network-dot" style={{ backgroundColor: "var(--status-red)" }} />
+                      <span style={{ color: "var(--status-red)", fontWeight: 800, fontSize: "0.8125rem", letterSpacing: "0.04em" }}>
+                        [ GUARDIANS CONFIRMED DEATH ]
+                      </span>
+                      <span style={{ color: "#EDEAE3", fontSize: "0.875rem" }}>
+                        All {guardians.length} guardian{guardians.length === 1 ? "" : "s"} attested. Timelocks are reduced by 99% — heirs can inherit almost immediately. Check in with World ID to reverse this.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsCheckInModalOpen(true)}
+                      className="btn-brass"
+                      style={{ padding: "8px 18px", fontSize: "0.75rem", whiteSpace: "nowrap", borderRadius: 0 }}
+                    >
+                      CHECK IN — I&apos;M ALIVE
                     </button>
                   </div>
                 )}
@@ -853,6 +1153,26 @@ export default function VaultDashboardPage() {
                   </div>
                 )}
 
+                {/* Succession lifecycle pipeline — where this vault currently
+                    sits across the liveness → distribution flow. */}
+                {(!isStatusLoading || rawStatus !== undefined) && (
+                  <div
+                    style={{
+                      padding: "24px 32px",
+                      borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+                      background: "rgba(255, 255, 255, 0.01)",
+                    }}
+                  >
+                    <span className="section-tag" style={{ margin: "0 0 16px", display: "block" }}>
+                      [ SUCCESSION LIFECYCLE ]
+                    </span>
+                    <PipelineVisualizer
+                      stages={LIFECYCLE_STAGES}
+                      currentIndex={vaultStageIndex(status)}
+                    />
+                  </div>
+                )}
+
                 {/* Main Focus Area: Underline Tabs */}
                 <div
                   role="tablist"
@@ -867,10 +1187,12 @@ export default function VaultDashboardPage() {
                 >
                   {[
                     { id: "heirs", label: `Authorized Heirs (${heirs.length})` },
+                    { id: "guardians", label: `Guardians (${guardians.length})` },
                     { id: "assets", label: `Allocated Assets (${assetList.length})` },
                     { id: "parameters", label: `Timelock Parameters` },
                     { id: "activity", label: `Activity Log` },
                     { id: "watchdog", label: `Watchdog & Alerts` },
+                    { id: "message", label: `Legacy Message` },
                   ].map((tab) => {
                     const isActive = activeTab === tab.id;
                     return (
@@ -901,8 +1223,21 @@ export default function VaultDashboardPage() {
                     <HeirList
                       heirs={heirs}
                       vaultStatus={status}
+                      heirNames={heirNames}
                       onAddHeir={handleAddHeir}
                       onRemoveHeir={handleRemoveHeir}
+                      isLoading={isStatusLoading && rawStatus === undefined}
+                    />
+                  )}
+
+                  {activeTab === "guardians" && (
+                    <GuardianList
+                      guardians={guardians}
+                      vaultStatus={status}
+                      deathConfirmed={deathConfirmed}
+                      attestationCount={deathAttestationCount}
+                      onAddGuardian={handleAddGuardian}
+                      onRemoveGuardian={handleRemoveGuardian}
                       isLoading={isStatusLoading && rawStatus === undefined}
                     />
                   )}
@@ -944,6 +1279,14 @@ export default function VaultDashboardPage() {
                       ownerAddress={address}
                     />
                   )}
+
+                  {activeTab === "message" && selectedVault && address && (
+                    <SealedMessagePanel
+                      vaultAddress={selectedVault}
+                      ownerAddress={address}
+                      heirs={heirs}
+                    />
+                  )}
                 </div>
               </>
           </div>
@@ -976,6 +1319,13 @@ export default function VaultDashboardPage() {
           onCheckInSuccess={handleCheckInSuccess}
         />
       )}
+
+      {/* Web2 "name your vault" step — precedes deployment */}
+      <VaultCreationModal
+        isOpen={isNamingVault}
+        onClose={() => setIsNamingVault(false)}
+        onDeploy={handleConfirmVaultName}
+      />
 
       {/* Vault Deployment HUD Modal */}
       <VaultDeploymentModal
