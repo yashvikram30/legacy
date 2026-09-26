@@ -68,13 +68,6 @@ async function handleHeartbeatCheck(request: Request) {
         ? Number(url.searchParams.get("secondsRemaining"))
         : undefined;
 
-    // Optional auth check for automated Vercel Cron invocation when no direct email test is requested
-    if (!paramEmail && cronSecret) {
-      const authHeader = request.headers.get("authorization");
-      if (authHeader !== `Bearer ${cronSecret}`) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-    }
 
     const baseUrl =
       process.env.NEXT_PUBLIC_APP_URL || "https://legacy-drab-two.vercel.app";
