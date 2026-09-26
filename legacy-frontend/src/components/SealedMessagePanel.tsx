@@ -304,10 +304,11 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirName
                 </button>
               </div>
 
-              <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
                   Or leave a video{state.hasSealedVideo && state.sealedVideoAt ? ` — replacing the one sealed on ${new Date(state.sealedVideoAt).toLocaleDateString()}` : ""}
                 </span>
+
                 <input
                   ref={videoInputRef}
                   type="file"
@@ -315,30 +316,97 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirName
                   aria-label="Video message"
                   disabled={isSealingVideo}
                   onChange={(e) => handleSelectVideoFile(e.target.files?.[0] ?? null)}
-                  className="flow-input"
+                  style={{ display: "none" }}
                 />
-                {videoFile && (
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                    {videoFile.name} · {(videoFile.size / (1024 * 1024)).toFixed(1)}MB
-                  </span>
-                )}
-                {isSealingVideo && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
-                      {videoStage}{uploadPct > 0 && uploadPct < 100 ? ` ${uploadPct.toFixed(0)}%` : ""}
+
+                {!videoFile ? (
+                  <button
+                    type="button"
+                    onClick={() => videoInputRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleSelectVideoFile(e.dataTransfer.files?.[0] ?? null);
+                    }}
+                    disabled={isSealingVideo}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "28px 20px",
+                      borderRadius: 12,
+                      border: "1px dashed rgba(255, 255, 255, 0.18)",
+                      background: "rgba(255, 255, 255, 0.02)",
+                      color: "var(--text-secondary)",
+                      cursor: isSealingVideo ? "not-allowed" : "pointer",
+                      transition: "border-color 150ms ease, background-color 150ms ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.35)";
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.18)";
+                      e.currentTarget.style.background = "rgba(255, 255, 255, 0.02)";
+                    }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="2" y="5" width="14" height="14" rx="2" />
+                      <path d="M16 10l6-3v10l-6-3" />
+                    </svg>
+                    <span style={{ fontSize: "0.875rem", color: "#ffffff" }}>Choose a video, or drag one here</span>
+                    <span style={{ fontSize: "0.75rem" }}>
+                      Up to {(MAX_VIDEO_BYTES / (1024 * 1024)).toFixed(0)}MB
                     </span>
-                    <div style={{ height: 4, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  </button>
+                ) : (
+                  <div className="setting-row" style={{ borderRadius: 10, border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                    <div className="setting-label" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: "var(--text-secondary)", flexShrink: 0 }}>
+                        <rect x="2" y="5" width="14" height="14" rx="2" />
+                        <path d="M16 10l6-3v10l-6-3" />
+                      </svg>
+                      <div style={{ minWidth: 0 }}>
+                        <strong style={{ overflowWrap: "anywhere" }}>{videoFile.name}</strong>
+                        <span>{(videoFile.size / (1024 * 1024)).toFixed(1)}MB</span>
+                      </div>
+                    </div>
+                    {!isSealingVideo && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoFile(null);
+                          if (videoInputRef.current) videoInputRef.current.value = "";
+                        }}
+                        className="flow-btn flow-btn--ghost"
+                        style={{ padding: "6px 14px", fontSize: "0.8125rem" }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {isSealingVideo && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                      {videoStage}{uploadPct > 0 && uploadPct < 100 ? ` — ${uploadPct.toFixed(0)}%` : ""}
+                    </span>
+                    <div style={{ height: 6, borderRadius: 999, background: "rgba(255, 255, 255, 0.08)", overflow: "hidden" }}>
                       <div
                         style={{
-                          width: `${uploadPct}%`,
+                          width: `${Math.max(uploadPct, videoStage ? 4 : 0)}%`,
                           height: "100%",
-                          backgroundColor: "var(--accent-brass)",
+                          borderRadius: 999,
+                          backgroundColor: "#ffffff",
                           transition: "width 0.2s ease",
                         }}
                       />
                     </div>
                   </div>
                 )}
+
                 <button
                   type="button"
                   onClick={handleSealVideo}
