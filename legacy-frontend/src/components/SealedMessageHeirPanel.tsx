@@ -104,111 +104,55 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
   if (!isHeir) return null;
 
   return (
-    <div
-      style={{
-        margin: "0 32px 32px",
-        padding: "24px",
-        border: "1px solid var(--border-hairline)",
-        background: "rgba(255,255,255,0.02)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-      }}
-    >
-      <span className="section-tag" style={{ margin: 0 }}>[ SEALED LEGACY MESSAGE ]</span>
+    <section className="console-card">
+      <div className="console-tabpanel panel-stack">
+        <h3 className="panel-title" style={{ fontSize: "1.0625rem" }}>
+          Sealed message
+        </h3>
 
-      {isLoading || !state ? (
-        <div className="skeleton-shimmer" style={{ width: "100%", height: 60 }} />
-      ) : revealed !== null ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontSize: "0.75rem", color: "var(--status-green)", fontFamily: "var(--font-data)" }}>
-            ✓ DECRYPTED · visible only in your browser
-          </span>
-          <pre
-            className="font-data"
-            style={{
-              margin: 0,
-              padding: "16px",
-              background: "#000000",
-              border: "1px solid var(--status-green)",
-              color: "#ffffff",
-              fontSize: "0.875rem",
-              lineHeight: 1.6,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {revealed}
-          </pre>
-          <button
-            type="button"
-            onClick={() => setRevealed(null)}
-            className="btn-secondary"
-            style={{ alignSelf: "flex-start", padding: "6px 14px", fontSize: "0.75rem" }}
-          >
-            Hide
-          </button>
-        </div>
-      ) : !state.enrolled ? (
-        <>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-            The vault owner can leave you a private, encrypted message. Enroll your decryption key (a free, gasless
-            signature) so the owner can seal one to your wallet. Only you will ever be able to read it.
-          </p>
-          <button
-            type="button"
-            onClick={handleEnroll}
-            disabled={busy}
-            className="btn-hero-action"
-            style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-          >
-            <span>{busy ? "AWAITING SIGNATURE…" : "ENROLL DECRYPTION KEY"}</span>
-            <span className="arrow-icon" aria-hidden="true">→</span>
-          </button>
-        </>
-      ) : !state.hasSealed ? (
-        <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-          ✓ You&apos;re enrolled. No message has been sealed to you yet — the owner can now leave one, and it will appear
-          here to unseal after succession.
-        </p>
-      ) : !state.canReveal ? (
-        <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
-          <strong style={{ color: "var(--status-amber)" }}>A sealed message awaits you.</strong> It unlocks once the
-          vault enters succession (Red status). Until then it stays encrypted and cannot be retrieved.
-        </p>
-      ) : (
-        <>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-primary)", lineHeight: 1.6, margin: 0 }}>
-            <strong style={{ color: "var(--status-green)" }}>A sealed message is ready.</strong> Sign to derive your key
-            and decrypt it locally in your browser.
-          </p>
-          <button
-            type="button"
-            onClick={handleUnseal}
-            disabled={busy}
-            className="btn-hero-action"
-            style={{ alignSelf: "flex-start", padding: "12px 24px" }}
-          >
-            <span>{busy ? "DECRYPTING…" : "UNSEAL MESSAGE"}</span>
-            <span className="arrow-icon" aria-hidden="true">→</span>
-          </button>
-        </>
-      )}
+        {isLoading || !state ? (
+          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: 12 }} />
+        ) : revealed !== null ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <span className="state-pill">
+              <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
+              Decrypted — visible only in your browser
+            </span>
+            <pre className="panel-summary font-data" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {revealed}
+            </pre>
+            <button type="button" onClick={() => setRevealed(null)} className="flow-btn flow-btn--ghost" style={{ alignSelf: "flex-start" }}>
+              Hide
+            </button>
+          </div>
+        ) : !state.enrolled ? (
+          <>
+            <p className="panel-lead">
+              The owner can leave you a private message. Sign once (free, no gas) to set up your key, so only you can ever read it.
+            </p>
+            <button type="button" onClick={handleEnroll} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+              {busy ? "Waiting for signature…" : "Set up your key"}
+            </button>
+          </>
+        ) : !state.hasSealed ? (
+          <p className="panel-lead">No message yet. It&apos;ll appear here once the owner writes one.</p>
+        ) : !state.canReveal ? (
+          <div className="panel-note">
+            <strong>A message is waiting.</strong> It unlocks once claims open.
+          </div>
+        ) : (
+          <>
+            <div className="panel-note panel-note--success">
+              <strong>A sealed message is ready.</strong> Sign to decrypt it in your browser.
+            </div>
+            <button type="button" onClick={handleUnseal} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+              {busy ? "Decrypting…" : "Unseal message"}
+            </button>
+          </>
+        )}
 
-      {error && (
-        <div
-          style={{
-            padding: "10px 14px",
-            fontSize: "0.8125rem",
-            fontFamily: "var(--font-data)",
-            color: "#ffffff",
-            border: "1px solid var(--status-red)",
-            background: "rgba(193,80,63,0.12)",
-          }}
-        >
-          {error}
-        </div>
-      )}
-    </div>
+        {error && <div className="panel-note panel-note--error">{error}</div>}
+      </div>
+    </section>
   );
 }

@@ -112,119 +112,65 @@ export function GuardianAttestationPanel({ vaultAddress, viewerAddress }: Guardi
     }
   };
 
-  const accent = deathConfirmed ? "var(--status-red)" : "var(--accent-brass)";
+  const accent = deathConfirmed ? "var(--status-red)" : "var(--text-primary)";
 
   return (
-    <div
-      style={{
-        margin: "0 32px 32px",
-        border: `1px solid ${deathConfirmed ? "var(--status-red)" : "rgba(255, 255, 255, 0.15)"}`,
-        backgroundColor: deathConfirmed ? "rgba(193, 80, 63, 0.06)" : "rgba(255, 255, 255, 0.015)",
-      }}
-    >
-      <div style={{ padding: "20px 24px", borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}>
-        <span className="section-tag" style={{ margin: 0, color: accent }}>
-          [ GUARDIAN DEATH ATTESTATION ]
-        </span>
-        <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.55, marginTop: 8, marginBottom: 0 }}>
-          {deathConfirmed
-            ? "All guardians have attested. Every timelock on this vault is reduced by 99% — heirs can inherit almost immediately. An owner check-in reverses this."
-            : "Guardians nominated by the owner can collectively attest that the owner has died. A unanimous attestation cuts the time heirs must wait to inherit by 99%."}
-        </p>
-      </div>
+    <section className={`console-card${deathConfirmed ? " console-alert--danger" : ""}`}>
+      <div className="console-tabpanel panel-stack">
+        <div>
+          <h3 className="panel-title" style={{ fontSize: "1.0625rem" }}>
+            Guardian attestation
+          </h3>
+          <p className="panel-lead">
+            {deathConfirmed
+              ? "All guardians confirmed. Waiting periods are cut by 99%; an owner check-in reverses this."
+              : "People the owner trusts can confirm they've passed away, cutting the waiting period by 99%."}
+          </p>
+        </div>
 
-      <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        {/* Progress */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span className="font-data" style={{ fontSize: "0.75rem", color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Attestations
-            </span>
-            <span className="font-data" style={{ fontSize: "0.9375rem", color: "#ffffff", fontWeight: 700 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+            <span>Attestations</span>
+            <strong style={{ color: accent, fontWeight: 600 }}>
               {attestationCount} / {totalGuardians}
-            </span>
+            </strong>
           </div>
-          <div style={{ height: 8, backgroundColor: "rgba(255, 255, 255, 0.08)", borderRadius: 0, overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${pct}%`,
-                height: "100%",
-                backgroundColor: accent,
-                boxShadow: `0 0 8px ${accent}`,
-                transition: "width 0.4s var(--ease-out-cubic, ease-out)",
-              }}
-            />
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${pct}%`, backgroundColor: accent }} />
           </div>
         </div>
 
         {deathConfirmed ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "12px 16px",
-              border: "1px solid var(--status-red)",
-              backgroundColor: "rgba(193, 80, 63, 0.1)",
-            }}
-          >
+          <span className="state-pill">
             <span className="network-dot" style={{ backgroundColor: "var(--status-red)" }} />
-            <span style={{ color: "#ffffff", fontSize: "0.875rem", fontWeight: 600 }}>
-              DEATH CONFIRMED · ACCELERATED SUCCESSION ACTIVE
-            </span>
-          </div>
+            Death confirmed · waiting periods reduced
+          </span>
         ) : isGuardian ? (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             {!hasAttested ? (
-              <button
-                type="button"
-                onClick={() => runTx("attestDeath")}
-                disabled={isSubmitting}
-                className="btn-brass"
-                style={{ padding: "10px 20px", fontSize: "0.8125rem", borderRadius: 0 }}
-              >
-                {isSubmitting ? "SUBMITTING…" : "Attest Owner Has Died"}
+              <button type="button" onClick={() => runTx("attestDeath")} disabled={isSubmitting} className="flow-btn">
+                {isSubmitting ? "Submitting…" : "Attest the owner has died"}
               </button>
             ) : (
               <>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--status-amber)", fontSize: "0.8125rem", fontFamily: "var(--font-data)" }}>
+                <span className="state-pill">
                   <span className="network-dot" style={{ backgroundColor: "var(--status-amber)" }} />
-                  You have attested.
+                  You&apos;ve attested
                 </span>
-                <button
-                  type="button"
-                  onClick={() => runTx("revokeAttestation")}
-                  disabled={isSubmitting}
-                  className="btn-secondary"
-                  style={{ padding: "8px 16px", fontSize: "0.75rem", borderRadius: 0 }}
-                >
-                  {isSubmitting ? "…" : "Withdraw attestation"}
+                <button type="button" onClick={() => runTx("revokeAttestation")} disabled={isSubmitting} className="flow-btn flow-btn--ghost">
+                  {isSubmitting ? "…" : "Withdraw"}
                 </button>
               </>
             )}
           </div>
         ) : (
-          <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", fontFamily: "var(--font-data)" }}>
-            {viewerAddress
-              ? "Your connected wallet is not a guardian of this vault — this is a read-only view of the vote."
-              : "Connect a guardian wallet to cast an attestation."}
-          </span>
+          <p style={{ margin: 0, fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+            {viewerAddress ? "Read-only — this wallet isn't a guardian." : "Connect a guardian wallet to attest."}
+          </p>
         )}
 
-        {error && (
-          <div
-            style={{
-              padding: "10px 14px",
-              backgroundColor: "rgba(193, 80, 63, 0.12)",
-              border: "1px solid var(--status-red)",
-              fontSize: "0.8125rem",
-              color: "#ffffff",
-            }}
-          >
-            {error}
-          </div>
-        )}
+        {error && <div className="panel-note panel-note--error">{error}</div>}
       </div>
-    </div>
+    </section>
   );
 }
