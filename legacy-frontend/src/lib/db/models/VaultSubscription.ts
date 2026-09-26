@@ -23,6 +23,12 @@ export interface IVaultSubscription extends Document {
     timestamp: number;
     cycleEpoch: number;
   };
+  lastClaimAlertSent?: {
+    threshold: AlertThreshold;
+    timestamp: number;
+    claimInitiatedAt: number;
+    heirAddress: string;
+  };
   recentAlerts: IAlertLog[];
   createdAt: Date;
   updatedAt: Date;
@@ -33,7 +39,17 @@ const AlertLogSchema = new Schema<IAlertLog>(
     id: { type: String, required: true },
     threshold: {
       type: String,
-      enum: ["7d", "3d", "24h", "amber", "claim_initiated", "vault_created", "test"],
+      enum: [
+        "7d",
+        "3d",
+        "24h",
+        "amber",
+        "claim_initiated",
+        "claim_expiring_24h",
+        "claim_expired",
+        "vault_created",
+        "test",
+      ],
       required: true,
     },
     title: { type: String, required: true },
@@ -79,10 +95,39 @@ const VaultSubscriptionSchema = new Schema<IVaultSubscription>(
     lastAlertSent: {
       threshold: {
         type: String,
-        enum: ["7d", "3d", "24h", "amber", "claim_initiated", "vault_created", "test"],
+        enum: [
+          "7d",
+          "3d",
+          "24h",
+          "amber",
+          "claim_initiated",
+          "claim_expiring_24h",
+          "claim_expired",
+          "vault_created",
+          "test",
+        ],
       },
       timestamp: { type: Number },
       cycleEpoch: { type: Number },
+    },
+    lastClaimAlertSent: {
+      threshold: {
+        type: String,
+        enum: [
+          "7d",
+          "3d",
+          "24h",
+          "amber",
+          "claim_initiated",
+          "claim_expiring_24h",
+          "claim_expired",
+          "vault_created",
+          "test",
+        ],
+      },
+      timestamp: { type: Number },
+      claimInitiatedAt: { type: Number },
+      heirAddress: { type: String, lowercase: true, trim: true },
     },
     recentAlerts: {
       type: [AlertLogSchema],

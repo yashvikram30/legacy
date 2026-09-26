@@ -67,27 +67,85 @@ export function publicKeyFromSignature(signature: string): string {
   return bytesToHex(x25519.getPublicKey(derivePrivateKey(signature)));
 }
 
-/** Owner-side: encrypt plaintext to the heir's published public key. */
-export function sealMessage(plaintext: string, heirPublicKeyHex: string): SealedBundle {
+/** Owner-side: encrypt arbitrary bytes to the heir's published public key. */
+export function sealBytes(
+  plaintext: Uint8Array,
+  heirPublicKeyHex: string
+): { ephPub: string; nonce: string; ciphertext: Uint8Array } {
   const heirPub = hexToBytes(heirPublicKeyHex);
   const ephPriv = x25519.utils.randomPrivateKey();
   const ephPub = x25519.getPublicKey(ephPriv);
   const shared = x25519.getSharedSecret(ephPriv, heirPub);
   const key = sha256(shared);
   const nonce = randomBytes(24);
-  const ct = xchacha20poly1305(key, nonce).encrypt(utf8ToBytes(plaintext));
-  return { ephPub: bytesToHex(ephPub), nonce: bytesToHex(nonce), ct: bytesToHex(ct) };
+  const ciphertext = xchacha20poly1305(key, nonce).encrypt(plaintext);
+  return { ephPub: bytesToHex(ephPub), nonce: bytesToHex(nonce), ciphertext };
+}
+
+/** Heir-side: decrypt bytes sealed with {@link sealBytes} using the derived private key. */
+export function unsealBytes(
+  ephPubHex: string,
+  nonceHex: string,
+  ciphertext: Uint8Array,
+  privKey: Uint8Array
+): Uint8Array {
+  const shared = x25519.getSharedSecret(privKey, hexToBytes(ephPubHex));
+  const key = sha256(shared);
+  return xchacha20poly1305(key, hexToBytes(nonceHex)).decrypt(ciphertext);
+}
+
+/** Owner-side: encrypt plaintext to the heir's published public key. */
+export function sealMessage(plaintext: string, heirPublicKeyHex: string): SealedBundle {
+  const { ephPub, nonce, ciphertext } = sealBytes(utf8ToBytes(plaintext), heirPublicKeyHex);
+  return { ephPub, nonce, ct: bytesToHex(ciphertext) };
 }
 
 /** Heir-side: decrypt a sealed bundle with the derived private key. */
 export function unsealMessage(bundle: SealedBundle, privKey: Uint8Array): string {
-  const shared = x25519.getSharedSecret(privKey, hexToBytes(bundle.ephPub));
-  const key = sha256(shared);
-  const pt = xchacha20poly1305(key, hexToBytes(bundle.nonce)).decrypt(hexToBytes(bundle.ct));
+  const pt = unsealBytes(bundle.ephPub, bundle.nonce, hexToBytes(bundle.ct), privKey);
   return new TextDecoder().decode(pt);
 }
 
 /** Stable digest of a bundle, used to bind the owner's authenticating signature. */
 export function digestBundle(bundle: SealedBundle): string {
   return bytesToHex(sha256(utf8ToBytes(`${bundle.ephPub}.${bundle.nonce}.${bundle.ct}`)));
+}
+
+/** Hex-encoded sha256 of arbitrary bytes (used to bind a signature to an off-chain blob). */
+export function sha256Hex(bytes: Uint8Array): string {
+  return bytesToHex(sha256(bytes));
+}
+
+export interface SealedVideoMeta {
+  /** ephemeral X25519 public key (hex) */
+  ephPub: string;
+  /** XChaCha20 nonce (hex) */
+  nonce: string;
+  /** URL of the encrypted video blob (ciphertext only; useless without the heir's key) */
+  blobUrl: string;
+  /** sha256 of the ciphertext bytes, hex — binds the owner's signature to this exact upload */
+  ciphertextHash: string;
+  mimeType: string;
+  size: number;
+}
+
+/**
+ * The message the owner signs to authenticate a sealed video. Binds the
+ * signature to the specific blob (via its ciphertext hash) so the URL can't
+ * be swapped after signing.
+ */
+export function buildSealVideoMessage(vault: string, heir: string, digest: string): string {
+  return [
+    "Legacy Protocol — Seal inheritance video",
+    `Vault: ${vault.toLowerCase()}`,
+    `Heir: ${heir.toLowerCase()}`,
+    `Digest: ${digest}`,
+  ].join("\n");
+}
+
+/** Stable digest of a sealed video's metadata, used to bind the owner's authenticating signature. */
+export function digestVideoMeta(meta: Pick<SealedVideoMeta, "ephPub" | "nonce" | "blobUrl" | "ciphertextHash">): string {
+  return bytesToHex(
+    sha256(utf8ToBytes(`${meta.ephPub}.${meta.nonce}.${meta.blobUrl}.${meta.ciphertextHash}`))
+  );
 }

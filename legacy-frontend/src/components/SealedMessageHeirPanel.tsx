@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSignMessage } from "wagmi";
 import {
   buildDeriveMessage,
   derivePrivateKey,
+  sha256Hex,
+  unsealBytes,
   unsealMessage,
   type SealedBundle,
+  type SealedVideoMeta,
 } from "@/lib/inheritance/crypto";
 
 interface SealedMessageHeirPanelProps {
@@ -21,6 +24,9 @@ interface HeirInheritanceState {
   canReveal: boolean;
   sealedAt: number | null;
   bundle: SealedBundle | null;
+  hasSealedVideo: boolean;
+  sealedVideoAt: number | null;
+  video: SealedVideoMeta | null;
 }
 
 export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: SealedMessageHeirPanelProps) {
@@ -30,6 +36,21 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
   const [busy, setBusy] = useState(false);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoStage, setVideoStage] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [revealedVideoUrl, setRevealedVideoUrl] = useState<string | null>(null);
+  const revealedVideoUrlRef = useRef<string | null>(null);
+
+  // Revoke the object URL when it changes or the panel unmounts, so the
+  // decrypted plaintext isn't kept around in memory longer than needed.
+  useEffect(() => {
+    revealedVideoUrlRef.current = revealedVideoUrl;
+    return () => {
+      if (revealedVideoUrlRef.current) URL.revokeObjectURL(revealedVideoUrlRef.current);
+    };
+  }, [revealedVideoUrl]);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -43,6 +64,9 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
           canReveal: Boolean(data.canReveal),
           sealedAt: data.sealedAt ?? null,
           bundle: data.bundle ?? null,
+          hasSealedVideo: Boolean(data.hasSealedVideo),
+          sealedVideoAt: data.sealedVideoAt ?? null,
+          video: data.video ?? null,
         });
       }
     } catch {
@@ -101,6 +125,47 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
     }
   };
 
+  const handleUnsealVideo = async () => {
+    if (!state?.video) return;
+    try {
+      setVideoBusy(true);
+      setVideoError(null);
+
+      setVideoStage("Fetching encrypted video…");
+      const res = await fetch(state.video.blobUrl);
+      if (!res.ok) throw new Error("Failed to download the sealed video.");
+      const ciphertext = new Uint8Array(await res.arrayBuffer());
+
+      // Defense in depth: confirms the fetched bytes match what the owner
+      // actually signed off on, independent of the decryption step below.
+      const actualHash = sha256Hex(ciphertext);
+      if (actualHash !== state.video.ciphertextHash) {
+        throw new Error("Video integrity check failed — the downloaded file doesn't match what was sealed.");
+      }
+
+      setVideoStage("Deriving key & decrypting…");
+      const message = buildDeriveMessage(vaultAddress, heirAddress);
+      const signature = await signMessageAsync({ message });
+      const priv = derivePrivateKey(signature);
+      const plaintext = unsealBytes(state.video.ephPub, state.video.nonce, ciphertext, priv);
+
+      const blob = new Blob([new Uint8Array(plaintext)], { type: state.video.mimeType });
+      setRevealedVideoUrl(URL.createObjectURL(blob));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to unseal video";
+      setVideoError(
+        msg.includes("User rejected")
+          ? "Signature request rejected."
+          : msg.includes("integrity check")
+          ? msg
+          : "Could not decrypt. Ensure you're using the same wallet that enrolled this key."
+      );
+    } finally {
+      setVideoBusy(false);
+      setVideoStage(null);
+    }
+  };
+
   if (!isHeir) return null;
 
   return (
@@ -110,80 +175,111 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
           Sealed message
         </h3>
 
-        {isLoading || !state ? (
-          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: "var(--radius-sm, 6px)" }} />
+{isLoading || !state ? (
+          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: 12 }} />
         ) : !state.enrolled ? (
           <>
-            <p className="panel-lead" style={{ margin: 0, lineHeight: 1.6 }}>
-              The vault owner can leave you a private, encrypted message. Enroll your decryption key (a free,
-              gasless signature) so the owner can seal one to your wallet. Only you will ever be able to read it.
+            <p className="panel-lead">
+              Set up your key (free, one signature) so only you can read a message or video the owner leaves you.
             </p>
-            <button
-              type="button"
-              onClick={handleEnroll}
-              disabled={busy}
-              className="flow-btn"
-              style={{ alignSelf: "flex-start" }}
-            >
-              <span>{busy ? "Awaiting signature…" : "Enroll decryption key →"}</span>
+            <button type="button" onClick={handleEnroll} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+              {busy ? "Waiting for signature…" : "Set up your key"}
             </button>
           </>
-        ) : !state.hasSealed ? (
-          <p className="panel-lead" style={{ margin: 0, lineHeight: 1.6 }}>
-            ✓ You&apos;re enrolled. No message has been sealed to you yet — the owner can now leave one, and it will appear here to unseal after succession.
-          </p>
+        ) : !state.hasSealed && !state.hasSealedVideo ? (
+          <p className="panel-lead">Nothing yet. It&apos;ll appear here once the owner seals a message or video.</p>
         ) : !state.canReveal ? (
-          <div className="panel-note" style={{ borderLeft: "3px solid var(--status-amber)" }}>
-            <strong style={{ color: "var(--status-amber)" }}>A sealed message awaits you.</strong> It unlocks once the
-            vault enters succession (Red status). Until then it stays encrypted and cannot be retrieved.
-          </div>
-        ) : revealed !== null ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <span className="state-pill">
-              <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
-              Decrypted · visible only in your browser
-            </span>
-            <pre
-              className="panel-summary font-data"
-              style={{
-                margin: 0,
-                padding: "16px",
-                background: "#000000",
-                border: "1px solid var(--status-green)",
-                color: "#ffffff",
-                fontSize: "0.875rem",
-                lineHeight: 1.6,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
-              {revealed}
-            </pre>
-            <button
-              type="button"
-              onClick={() => setRevealed(null)}
-              className="flow-btn flow-btn--ghost"
-              style={{ alignSelf: "flex-start", padding: "6px 14px", fontSize: "0.75rem" }}
-            >
-              Hide
-            </button>
+          <div className="panel-note">
+            <strong>
+              A sealed {state.hasSealed && state.hasSealedVideo ? "message and video are" : state.hasSealedVideo ? "video is" : "message is"} waiting.
+            </strong>{" "}
+            It unlocks once claims open.
           </div>
         ) : (
-          <>
-            <div className="panel-note panel-note--success">
-              <strong style={{ color: "var(--status-green)" }}>A sealed message is ready.</strong> Sign to derive
-              your key and decrypt it locally in your browser.
-            </div>
-            <button
-              type="button"
-              onClick={handleUnseal}
-              disabled={busy}
-              className="flow-btn"
-              style={{ alignSelf: "flex-start" }}
-            >
-              <span>{busy ? "Decrypting…" : "Unseal message →"}</span>
-            </button>
-          </>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {state.hasSealed && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {revealed !== null ? (
+                  <>
+                    <span className="state-pill">
+                      <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
+                      Decrypted · visible only in your browser
+                    </span>
+                    <pre
+                      className="panel-summary font-data"
+                      style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                    >
+                      {revealed}
+                    </pre>
+                    <button
+                      type="button"
+                      onClick={() => setRevealed(null)}
+                      className="flow-btn flow-btn--ghost"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      Hide
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="panel-note panel-note--success">
+                      <strong>A sealed message is ready.</strong> Sign to decrypt it in your browser.
+                    </div>
+                    <button type="button" onClick={handleUnseal} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
+                      {busy ? "Decrypting…" : "Unseal message"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {state.hasSealedVideo && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  borderTop: state.hasSealed ? "1px solid var(--border-hairline)" : undefined,
+                  paddingTop: state.hasSealed ? 16 : 0,
+                }}
+              >
+                {revealedVideoUrl ? (
+                  <>
+                    <span className="state-pill">
+                      <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
+                      Decrypted · visible only in your browser
+                    </span>
+                    <video controls src={revealedVideoUrl} style={{ width: "100%", maxHeight: 420, borderRadius: 12, background: "#000000" }} />
+                    <button
+                      type="button"
+                      onClick={() => setRevealedVideoUrl(null)}
+                      className="flow-btn flow-btn--ghost"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      Hide
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="panel-note panel-note--success">
+                      <strong>A sealed video is ready.</strong> Sign to decrypt it in your browser.
+                    </div>
+                    {videoStage && <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>{videoStage}</span>}
+                    <button
+                      type="button"
+                      onClick={handleUnsealVideo}
+                      disabled={videoBusy}
+                      className="flow-btn"
+                      style={{ alignSelf: "flex-start" }}
+                    >
+                      {videoBusy ? "Decrypting…" : "Unseal video"}
+                    </button>
+                    {videoError && <div className="panel-note panel-note--error">{videoError}</div>}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {error && <div className="panel-note panel-note--error">{error}</div>}

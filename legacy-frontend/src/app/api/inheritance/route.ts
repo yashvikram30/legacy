@@ -25,18 +25,22 @@ export async function GET(request: Request) {
         enrolled: false,
         heirPublicKey: null,
         hasSealed: false,
+        hasSealedVideo: false,
         canReveal: false,
         bundle: null,
+        video: null,
       });
     }
 
     const hasSealed = Boolean(record.sealedBundle);
+    const hasSealedVideo = Boolean(record.sealedVideo);
 
-    // The sealed ciphertext is only released once the vault has entered
-    // succession (Red). It is encrypted regardless, but this enforces the
-    // "only after succession" reveal rule server-side, not just in the UI.
+    // The sealed ciphertext (and the encrypted video's blob URL) is only
+    // released once the vault has entered succession (Red). Both are
+    // encrypted regardless, but this enforces the "only after succession"
+    // reveal rule server-side, not just in the UI.
     let canReveal = false;
-    if (hasSealed) {
+    if (hasSealed || hasSealedVideo) {
       try {
         canReveal = await readVaultIsInSuccession(vault as `0x${string}`);
       } catch (err) {
@@ -49,9 +53,12 @@ export async function GET(request: Request) {
       enrolled: Boolean(record.heirPublicKey),
       heirPublicKey: record.heirPublicKey || null,
       hasSealed,
+      hasSealedVideo,
       sealedAt: record.sealedAt ?? null,
+      sealedVideoAt: record.sealedVideoAt ?? null,
       canReveal,
       bundle: canReveal ? record.sealedBundle : null,
+      video: canReveal ? record.sealedVideo ?? null : null,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Failed to load inheritance record";

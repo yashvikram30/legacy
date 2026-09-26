@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, isAddress } from "viem";
 import { worldChainSepolia } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
-import { getAllSubscriptions, updateLastAlert } from "@/lib/notifications/store";
-import { dispatchHeartbeatAlert } from "@/lib/notifications/dispatcher";
-import { AlertThreshold } from "@/types/notifications";
+import { getAllSubscriptions, updateLastAlert, updateLastClaimAlert } from "@/lib/notifications/store";
+import {
+  dispatchHeartbeatAlert,
+  dispatchClaimAlert,
+  dispatchClaimExpiringAlert,
+  dispatchClaimExpiredAlert,
+  dispatchTestAlert,
+} from "@/lib/notifications/dispatcher";
+import { AlertThreshold, VaultNotificationSubscription } from "@/types/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -18,24 +24,122 @@ export async function POST(request: Request) {
 
 async function handleHeartbeatCheck(request: Request) {
   try {
+    const url = new URL(request.url);
     const cronSecret = process.env.CRON_SECRET?.trim();
-    if (cronSecret) {
-      const authHeader = request.headers.get("authorization");
-      if (authHeader !== `Bearer ${cronSecret}`) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    let bodyData: Record<string, any> = {};
+    if (request.method === "POST") {
+      try {
+        bodyData = await request.json();
+      } catch {
+        // empty body or non-JSON
       }
     }
 
-    const host = request.headers.get("host") || "localhost:3000";
-    const protocol = request.headers.get("x-forwarded-proto") || "http";
-    const baseUrl = `${protocol}://${host}`;
+    // Extract parameters from URL search params or POST body
+    const paramEmail =
+      bodyData.email ||
+      bodyData.ownerEmail ||
+      url.searchParams.get("email") ||
+      url.searchParams.get("ownerEmail");
 
+    const paramVault =
+      bodyData.vaultAddress ||
+      bodyData.vault ||
+      url.searchParams.get("vaultAddress") ||
+      url.searchParams.get("vault");
+
+    const paramThreshold =
+      bodyData.threshold ||
+      bodyData.type ||
+      url.searchParams.get("threshold") ||
+      url.searchParams.get("type");
+
+    const paramHeir =
+      bodyData.heirAddress ||
+      bodyData.heir ||
+      url.searchParams.get("heirAddress") ||
+      url.searchParams.get("heir");
+
+    const paramSeconds =
+      bodyData.secondsRemaining !== undefined
+        ? Number(bodyData.secondsRemaining)
+        : url.searchParams.get("secondsRemaining")
+        ? Number(url.searchParams.get("secondsRemaining"))
+        : undefined;
+
+
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "https://legacy-drab-two.vercel.app";
+
+    const paramPush =
+      bodyData.pushEnabled !== undefined
+        ? Boolean(bodyData.pushEnabled)
+        : url.searchParams.get("pushEnabled") === "true";
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Direct Param Mode: Allows manual or programmatic dispatch by passing params
+    // ─────────────────────────────────────────────────────────────────────────────
+    if (paramEmail) {
+      const vaultStr = paramVault || "0x0000000000000000000000000000000000000000";
+      const validVault = isAddress(vaultStr)
+        ? (vaultStr as `0x${string}`)
+        : ("0x0000000000000000000000000000000000000000" as `0x${string}`);
+
+      const sub: VaultNotificationSubscription = {
+        vaultAddress: validVault,
+        ownerAddress: validVault,
+        email: paramEmail.trim().toLowerCase(),
+        emailVerified: true,
+        pushEnabled: paramPush,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      const heirStr = paramHeir || "0x1111111111111111111111111111111111111111";
+      const validHeir = isAddress(heirStr)
+        ? (heirStr as `0x${string}`)
+        : ("0x1111111111111111111111111111111111111111" as `0x${string}`);
+
+      const seconds = paramSeconds !== undefined ? paramSeconds : 86400; // default 24h
+      let dispatchRes: { success: boolean; channelsNotified: string[]; error?: string };
+
+      if (paramThreshold === "claim_initiated" || paramThreshold === "claim_started") {
+        dispatchRes = await dispatchClaimAlert(sub, validHeir, seconds, undefined, baseUrl);
+      } else if (paramThreshold === "claim_expiring_24h" || paramThreshold === "claim_expiring") {
+        dispatchRes = await dispatchClaimExpiringAlert(sub, validHeir, seconds, baseUrl);
+      } else if (paramThreshold === "claim_expired") {
+        dispatchRes = await dispatchClaimExpiredAlert(sub, validHeir, baseUrl);
+      } else if (paramThreshold === "test") {
+        dispatchRes = await dispatchTestAlert(sub, "email", baseUrl);
+      } else {
+        const threshold: AlertThreshold =
+          (paramThreshold as AlertThreshold) || (seconds <= 86400 ? "24h" : "7d");
+        dispatchRes = await dispatchHeartbeatAlert(sub, threshold, seconds, baseUrl);
+      }
+
+      return NextResponse.json({
+        success: dispatchRes.success,
+        mode: "direct_param_dispatch",
+        recipient: paramEmail,
+        vaultAddress: vaultStr,
+        threshold: paramThreshold || "heartbeat",
+        secondsRemaining: seconds,
+        channelsNotified: dispatchRes.channelsNotified,
+        error: dispatchRes.error,
+        baseUrl,
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Scheduled Cron Mode: Loop through all active vault subscriptions
+    // ─────────────────────────────────────────────────────────────────────────────
     const subscriptions = await getAllSubscriptions();
     if (subscriptions.length === 0) {
       return NextResponse.json({
         success: true,
         processed: 0,
-        message: "No active vault subscriptions to check.",
+        message: "No active vault subscriptions found to evaluate.",
       });
     }
 
@@ -53,6 +157,15 @@ async function handleHeartbeatCheck(request: Request) {
 
     for (const sub of subscriptions) {
       try {
+        if (!isAddress(sub.vaultAddress)) {
+          results.push({
+            vault: sub.vaultAddress,
+            skipped: true,
+            reason: "Non-EVM address format",
+          });
+          continue;
+        }
+
         const [lastCheckInRaw, checkInIntervalRaw, statusRaw] = await Promise.all([
           publicClient.readContract({
             address: sub.vaultAddress,
@@ -82,7 +195,7 @@ async function handleHeartbeatCheck(request: Request) {
 
         let neededThreshold: AlertThreshold | null = null;
 
-        // Long interval (> 1 day)
+        // Long interval (>= 1 day)
         if (checkInInterval >= 86400) {
           if (status === 0 /* Green */ && secondsRemaining > 0) {
             if (secondsRemaining <= 86400) {
@@ -145,6 +258,119 @@ async function handleHeartbeatCheck(request: Request) {
             secondsRemaining,
             threshold: "none_needed",
           });
+        }
+
+        // ── Active Contestable Claims Monitoring (Milestones 3 & 4) ───────────
+        try {
+          const heirs = (await publicClient.readContract({
+            address: sub.vaultAddress,
+            abi: LegacyVaultABI,
+            functionName: "getHeirs",
+          })) as `0x${string}`[];
+
+          if (heirs && heirs.length > 0) {
+            const contestableWindowRaw = await publicClient.readContract({
+              address: sub.vaultAddress,
+              abi: LegacyVaultABI,
+              functionName: "contestableWindow",
+            });
+            const contestableWindow = Number(contestableWindowRaw);
+
+            for (const heir of heirs) {
+              const [cStatusRaw, cInitRaw] = await Promise.all([
+                publicClient.readContract({
+                  address: sub.vaultAddress,
+                  abi: LegacyVaultABI,
+                  functionName: "claimStatus",
+                  args: [heir],
+                }),
+                publicClient.readContract({
+                  address: sub.vaultAddress,
+                  abi: LegacyVaultABI,
+                  functionName: "claimInitiatedAt",
+                  args: [heir],
+                }),
+              ]);
+
+              const cStatus = Number(cStatusRaw); // 1 = Contestable
+              const cInit = Number(cInitRaw);
+
+              // Active claim in progress: status is Contestable (1) and owner hasn't vetoed
+              if (cStatus === 1 && cInit > 0 && lastCheckIn < cInit) {
+                const vetoDeadline = cInit + contestableWindow;
+                const claimSecondsRemaining = vetoDeadline - now;
+
+                const lastClaimAlert = sub.lastClaimAlertSent;
+                const isNewClaimCycle =
+                  !lastClaimAlert ||
+                  lastClaimAlert.claimInitiatedAt !== cInit ||
+                  lastClaimAlert.heirAddress?.toLowerCase() !== heir.toLowerCase();
+
+                let neededClaimThreshold: AlertThreshold | null = null;
+
+                if (contestableWindow >= 86400) {
+                  if (claimSecondsRemaining > 0 && claimSecondsRemaining <= 86400) {
+                    if (isNewClaimCycle || lastClaimAlert.threshold !== "claim_expiring_24h") {
+                      neededClaimThreshold = "claim_expiring_24h";
+                    }
+                  } else if (claimSecondsRemaining <= 0) {
+                    if (isNewClaimCycle || lastClaimAlert.threshold !== "claim_expired") {
+                      neededClaimThreshold = "claim_expired";
+                    }
+                  }
+                } else {
+                  const fraction = claimSecondsRemaining / contestableWindow;
+                  if (claimSecondsRemaining > 0 && fraction <= 0.3) {
+                    if (isNewClaimCycle || lastClaimAlert.threshold !== "claim_expiring_24h") {
+                      neededClaimThreshold = "claim_expiring_24h";
+                    }
+                  } else if (claimSecondsRemaining <= 0) {
+                    if (isNewClaimCycle || lastClaimAlert.threshold !== "claim_expired") {
+                      neededClaimThreshold = "claim_expired";
+                    }
+                  }
+                }
+
+                if (neededClaimThreshold === "claim_expiring_24h") {
+                  const dispatchRes = await dispatchClaimExpiringAlert(
+                    sub,
+                    heir,
+                    claimSecondsRemaining,
+                    baseUrl
+                  );
+                  if (dispatchRes.success) {
+                    await updateLastClaimAlert(sub.vaultAddress, "claim_expiring_24h", cInit, heir);
+                    alertsDispatched++;
+                  }
+                  results.push({
+                    vault: sub.vaultAddress,
+                    type: "claim_expiring_24h",
+                    heir,
+                    secondsRemaining: claimSecondsRemaining,
+                    notified: dispatchRes.channelsNotified,
+                  });
+                } else if (neededClaimThreshold === "claim_expired") {
+                  const dispatchRes = await dispatchClaimExpiredAlert(
+                    sub,
+                    heir,
+                    baseUrl
+                  );
+                  if (dispatchRes.success) {
+                    await updateLastClaimAlert(sub.vaultAddress, "claim_expired", cInit, heir);
+                    alertsDispatched++;
+                  }
+                  results.push({
+                    vault: sub.vaultAddress,
+                    type: "claim_expired",
+                    heir,
+                    notified: dispatchRes.channelsNotified,
+                  });
+                }
+              }
+            }
+          }
+        } catch (claimErr) {
+          console.warn(`[Cron] Error checking claims for vault ${sub.vaultAddress}:`, claimErr);
         }
       } catch (err) {
         console.error(`[Cron] Error evaluating vault ${sub.vaultAddress}:`, err);
