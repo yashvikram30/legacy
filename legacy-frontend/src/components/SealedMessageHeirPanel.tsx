@@ -111,42 +111,77 @@ export function SealedMessageHeirPanel({ vaultAddress, heirAddress, isHeir }: Se
         </h3>
 
         {isLoading || !state ? (
-          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: 12 }} />
+          <div className="skeleton-shimmer" style={{ width: "100%", height: 60, borderRadius: "var(--radius-sm, 6px)" }} />
+        ) : !state.enrolled ? (
+          <>
+            <p className="panel-lead" style={{ margin: 0, lineHeight: 1.6 }}>
+              The vault owner can leave you a private, encrypted message. Enroll your decryption key (a free,
+              gasless signature) so the owner can seal one to your wallet. Only you will ever be able to read it.
+            </p>
+            <button
+              type="button"
+              onClick={handleEnroll}
+              disabled={busy}
+              className="flow-btn"
+              style={{ alignSelf: "flex-start" }}
+            >
+              <span>{busy ? "Awaiting signature…" : "Enroll decryption key →"}</span>
+            </button>
+          </>
+        ) : !state.hasSealed ? (
+          <p className="panel-lead" style={{ margin: 0, lineHeight: 1.6 }}>
+            ✓ You&apos;re enrolled. No message has been sealed to you yet — the owner can now leave one, and it will appear here to unseal after succession.
+          </p>
+        ) : !state.canReveal ? (
+          <div className="panel-note" style={{ borderLeft: "3px solid var(--status-amber)" }}>
+            <strong style={{ color: "var(--status-amber)" }}>A sealed message awaits you.</strong> It unlocks once the
+            vault enters succession (Red status). Until then it stays encrypted and cannot be retrieved.
+          </div>
         ) : revealed !== null ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <span className="state-pill">
               <span className="network-dot" style={{ backgroundColor: "var(--status-green)" }} />
-              Decrypted — visible only in your browser
+              Decrypted · visible only in your browser
             </span>
-            <pre className="panel-summary font-data" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <pre
+              className="panel-summary font-data"
+              style={{
+                margin: 0,
+                padding: "16px",
+                background: "#000000",
+                border: "1px solid var(--status-green)",
+                color: "#ffffff",
+                fontSize: "0.875rem",
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
               {revealed}
             </pre>
-            <button type="button" onClick={() => setRevealed(null)} className="flow-btn flow-btn--ghost" style={{ alignSelf: "flex-start" }}>
+            <button
+              type="button"
+              onClick={() => setRevealed(null)}
+              className="flow-btn flow-btn--ghost"
+              style={{ alignSelf: "flex-start", padding: "6px 14px", fontSize: "0.75rem" }}
+            >
               Hide
             </button>
-          </div>
-        ) : !state.enrolled ? (
-          <>
-            <p className="panel-lead">
-              The owner can leave you a private message. Sign once (free, no gas) to set up your key, so only you can ever read it.
-            </p>
-            <button type="button" onClick={handleEnroll} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
-              {busy ? "Waiting for signature…" : "Set up your key"}
-            </button>
-          </>
-        ) : !state.hasSealed ? (
-          <p className="panel-lead">No message yet. It&apos;ll appear here once the owner writes one.</p>
-        ) : !state.canReveal ? (
-          <div className="panel-note">
-            <strong>A message is waiting.</strong> It unlocks once claims open.
           </div>
         ) : (
           <>
             <div className="panel-note panel-note--success">
-              <strong>A sealed message is ready.</strong> Sign to decrypt it in your browser.
+              <strong style={{ color: "var(--status-green)" }}>A sealed message is ready.</strong> Sign to derive
+              your key and decrypt it locally in your browser.
             </div>
-            <button type="button" onClick={handleUnseal} disabled={busy} className="flow-btn" style={{ alignSelf: "flex-start" }}>
-              {busy ? "Decrypting…" : "Unseal message"}
+            <button
+              type="button"
+              onClick={handleUnseal}
+              disabled={busy}
+              className="flow-btn"
+              style={{ alignSelf: "flex-start" }}
+            >
+              <span>{busy ? "Decrypting…" : "Unseal message →"}</span>
             </button>
           </>
         )}
