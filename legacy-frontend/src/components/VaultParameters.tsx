@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { VaultStatus, PROTOCOL_FLOORS, humanDuration } from "@/lib/constants";
 
 interface VaultParametersProps {
@@ -166,14 +166,37 @@ function toSeconds(d: Duration): number {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * d.unit) : NaN;
 }
 
-/** The dial's full-scale ceiling — generous enough to cover the "Standard" preset. */
+/** One lap's full-scale ceiling — generous enough to cover the "Standard" preset. */
 const DIAL_MAX_SECONDS = 86400 * 30;
+/** Hard ceiling regardless of how many extra laps are spun — 10 years. */
+const ABSOLUTE_MAX_SECONDS = 86400 * 3650;
 
 const FIELD_COLOR: Record<FieldKey, string> = {
   interval: "var(--status-green)",
   grace: "var(--status-amber)",
   veto: "var(--status-red)",
 };
+
+/** Turns (1.0 = one full lap) → seconds. Lap 1 is log-scaled min→max; each
+ *  extra lap beyond that adds another full `max` worth of seconds linearly. */
+function secondsFromTurns(turns: number, min: number, max: number, logMin: number, logMax: number): number {
+  const t = Math.max(0, turns);
+  if (t <= 1) {
+    if (logMax === logMin) return min;
+    return Math.exp(logMin + t * (logMax - logMin));
+  }
+  return max * t;
+}
+
+/** Inverse of {@link secondsFromTurns} — recovers the turn count a committed value represents. */
+function turnsFromSeconds(seconds: number, max: number, logMin: number, logMax: number): number {
+  const v = Math.max(0, seconds);
+  if (v <= max) {
+    if (logMax === logMin) return 0;
+    return Math.min(Math.max((Math.log(Math.max(v, 1)) - logMin) / (logMax - logMin), 0), 1);
+  }
+  return v / max;
+}
 
 /** Snap a raw log-scale drag value to a friendlier increment based on its magnitude. */
 function niceRoundSeconds(s: number): number {
@@ -199,8 +222,10 @@ interface DurationDialProps {
 
 /**
  * A single draggable ring standing in for a duration field: drag (or arrow
- * keys) around it to set the value on a log scale, since these fields span
- * seconds to weeks. Replaces typing a number + picking a unit.
+ * keys) around it to set the value. One lap covers the log-scaled min→max
+ * range; rolling past 12 o'clock keeps adding another full lap's worth of
+ * time, with each completed lap left behind as a solid accent-colored ring
+ * that the current lap's progress overlaps as it sweeps around again.
  */
 function DurationDial({ seconds, min, max, color, label, disabled, onChange, size = 108 }: DurationDialProps) {
   const strokeWidth = 9;
@@ -212,10 +237,17 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
   const logMin = Math.log(Math.max(min, 1));
   const logMax = Math.log(Math.max(max, min + 1));
   const current = Number.isFinite(seconds) ? seconds : min;
-  const clamped = Math.min(Math.max(current, min), max);
-  const frac = logMax === logMin ? 0 : (Math.log(Math.max(clamped, 1)) - logMin) / (logMax - logMin);
+  const clamped = Math.min(Math.max(current, min), ABSOLUTE_MAX_SECONDS);
+
+  const turns = turnsFromSeconds(clamped, max, logMin, logMax);
+  const lapsCompleted = Math.floor(turns);
+  const lapFrac = turns - lapsCompleted;
 
   const ringTransform = `rotate(-90 ${cx} ${cy})`;
+
+  // Tracks continuous rotation across the drag gesture (in "turns"), so
+  // crossing 12 o'clock keeps accumulating instead of wrapping/jumping.
+  const dragRef = useRef<{ prevFrac: number; turns: number } | null>(null);
 
   const fracFromPoint = (clientX: number, clientY: number, el: Element) => {
     const rect = el.getBoundingClientRect();
@@ -226,21 +258,34 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
     return deg / 360;
   };
 
-  const applyFrac = (f: number) => {
-    // Dragging to the very top of a field whose true floor is 0 (e.g. grace
-    // period) snaps to exactly 0, rather than an unreachable log-scale limit.
-    const raw = min <= 0 && f < 0.015 ? 0 : Math.exp(logMin + f * (logMax - logMin));
-    onChange(Math.min(Math.max(niceRoundSeconds(raw), min), max));
+  const commitTurns = (nextTurns: number) => {
+    const clampedTurns = Math.max(0, nextTurns);
+    const raw = secondsFromTurns(clampedTurns, min, max, logMin, logMax);
+    onChange(Math.min(Math.max(niceRoundSeconds(raw), min), ABSOLUTE_MAX_SECONDS));
   };
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (disabled) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    applyFrac(fracFromPoint(e.clientX, e.clientY, e.currentTarget));
+    const f = fracFromPoint(e.clientX, e.clientY, e.currentTarget);
+    dragRef.current = { prevFrac: f, turns };
+    // Jump straight to the pointer's position on the initial click, same as before.
+    commitTurns(lapsCompleted + f);
   };
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (disabled || e.buttons !== 1) return;
-    applyFrac(fracFromPoint(e.clientX, e.clientY, e.currentTarget));
+    if (disabled || e.buttons !== 1 || !dragRef.current) return;
+    const f = fracFromPoint(e.clientX, e.clientY, e.currentTarget);
+    let delta = f - dragRef.current.prevFrac;
+    // Shortest path across the 0/1 wrap boundary — this is what lets a lap
+    // "complete" smoothly instead of snapping backwards through the dial.
+    if (delta > 0.5) delta -= 1;
+    if (delta < -0.5) delta += 1;
+    const nextTurns = dragRef.current.turns + delta;
+    dragRef.current = { prevFrac: f, turns: nextTurns };
+    commitTurns(nextTurns);
+  };
+  const handlePointerUp = () => {
+    dragRef.current = null;
   };
 
   const step = (dir: 1 | -1) => {
@@ -248,12 +293,13 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
     const base = Math.max(current, min, 1);
     const delta = Math.exp(Math.log(base) + dir * (logMax - logMin) * 0.03) - base;
     const next = current + (delta !== 0 ? delta : dir);
-    onChange(Math.min(Math.max(niceRoundSeconds(next), min), max));
+    onChange(Math.min(Math.max(niceRoundSeconds(next), min), ABSOLUTE_MAX_SECONDS));
   };
 
-  const knobAngleRad = (frac * 360 - 90) * (Math.PI / 180);
+  const knobAngleRad = (lapFrac * 360 - 90) * (Math.PI / 180);
   const knobX = cx + Math.cos(knobAngleRad) * r;
   const knobY = cy + Math.sin(knobAngleRad) * r;
+  const accentColor = "var(--accent-brass)";
 
   return (
     <div
@@ -261,7 +307,7 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
       tabIndex={disabled ? -1 : 0}
       aria-label={label}
       aria-valuemin={min}
-      aria-valuemax={max}
+      aria-valuemax={ABSOLUTE_MAX_SECONDS}
       aria-valuenow={Math.round(clamped)}
       aria-valuetext={Number.isFinite(seconds) ? humanDuration(seconds) : "unset"}
       aria-disabled={disabled}
@@ -282,9 +328,24 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
         viewBox={`0 0 ${size} ${size}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         style={{ cursor: disabled ? "default" : "grab", display: "block" }}
       >
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border-hairline)" strokeWidth={strokeWidth} />
+        {/* Solid accent ring left behind by each fully completed lap — the
+            current lap's arc below overlaps it, growing on top as it sweeps. */}
+        {lapsCompleted >= 1 && (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={accentColor}
+            strokeWidth={strokeWidth}
+            style={{ opacity: disabled ? 0.35 : 0.85 }}
+          />
+        )}
         <g transform={ringTransform}>
           <circle
             cx={cx}
@@ -295,7 +356,7 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
             strokeWidth={strokeWidth}
             strokeLinecap="round"
             style={{
-              strokeDasharray: `${Math.max(frac, 0.01) * circumference} ${circumference}`,
+              strokeDasharray: `${Math.max(lapFrac, lapsCompleted >= 1 ? 0 : 0.01) * circumference} ${circumference}`,
               opacity: disabled ? 0.4 : 1,
               transition: "stroke-dasharray 120ms ease-out",
               filter: disabled ? undefined : `drop-shadow(0 0 4px ${color})`,
@@ -309,6 +370,7 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
           position: "absolute",
           inset: 0,
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           pointerEvents: "none",
@@ -322,6 +384,11 @@ function DurationDial({ seconds, min, max, color, label, disabled, onChange, siz
         >
           {Number.isFinite(seconds) ? humanDuration(seconds, 1) : "—"}
         </span>
+        {lapsCompleted >= 1 && (
+          <span className="font-data" style={{ fontSize: "0.625rem", color: accentColor, marginTop: 2 }}>
+            +{lapsCompleted} lap{lapsCompleted === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
     </div>
   );
