@@ -74,6 +74,23 @@ function TimingClockPreview({
     strokeDashoffset: `${-from * circumference}`,
   });
 
+  // 60 evenly spaced clock-face ticks (like minute marks), longer/brighter at
+  // each of the 12 "hour" positions — purely decorative, reads as a clock.
+  const tickOuter = r - strokeWidth / 2 - 3;
+  const ticks = Array.from({ length: 60 }, (_, i) => {
+    const isHour = i % 5 === 0;
+    const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
+    const inner = tickOuter - (isHour ? 9 : 4);
+    return {
+      key: i,
+      isHour,
+      x1: cx + Math.cos(angle) * inner,
+      y1: cy + Math.sin(angle) * inner,
+      x2: cx + Math.cos(angle) * tickOuter,
+      y2: cy + Math.sin(angle) * tickOuter,
+    };
+  });
+
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Timing cycle preview">
@@ -82,6 +99,21 @@ function TimingClockPreview({
           <circle cx={cx} cy={cy} r={r} stroke="var(--status-green)" style={{ transition: "stroke-dasharray 300ms ease-out" }} {...band(0, greenEnd)} />
           <circle cx={cx} cy={cy} r={r} stroke="var(--status-amber)" style={{ transition: "stroke-dasharray 300ms ease-out, stroke-dashoffset 300ms ease-out" }} {...band(greenEnd, amberEnd)} />
           <circle cx={cx} cy={cy} r={r} stroke="var(--status-red)" style={{ transition: "stroke-dasharray 300ms ease-out, stroke-dashoffset 300ms ease-out" }} {...band(amberEnd, 1)} />
+        </g>
+        {/* Clock-face tick marks, inside the ring */}
+        <g>
+          {ticks.map((t) => (
+            <line
+              key={t.key}
+              x1={t.x1}
+              y1={t.y1}
+              x2={t.x2}
+              y2={t.y2}
+              stroke={t.isHour ? "var(--text-secondary)" : "var(--border-mid, rgba(255,255,255,0.15))"}
+              strokeWidth={t.isHour ? 2 : 1}
+              strokeLinecap="round"
+            />
+          ))}
         </g>
         {/* 12 o'clock marker, echoing the check-in ritual's "reset to top" moment */}
         <circle cx={cx} cy={strokeWidth / 2 + 1} r={2} fill="var(--text-secondary)" />
