@@ -1,8 +1,17 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSignMessage } from "wagmi";
-import { buildSealMessage, digestBundle, sealMessage } from "@/lib/inheritance/crypto";
+import { upload } from "@vercel/blob/client";
+import {
+  buildSealMessage,
+  buildSealVideoMessage,
+  digestBundle,
+  digestVideoMeta,
+  sealBytes,
+  sealMessage,
+  sha256Hex,
+} from "@/lib/inheritance/crypto";
 
 interface SealedMessagePanelProps {
   vaultAddress: `0x${string}`;
@@ -13,11 +22,16 @@ interface SealedMessagePanelProps {
   onGoToHeirs?: () => void;
 }
 
+/** Ciphertext is ~plaintext size + a small AEAD tag; keep well under the 200MB server-side cap. */
+const MAX_VIDEO_BYTES = 190 * 1024 * 1024;
+
 interface InheritanceState {
   enrolled: boolean;
   heirPublicKey: string | null;
   hasSealed: boolean;
   sealedAt: number | null;
+  hasSealedVideo: boolean;
+  sealedVideoAt: number | null;
 }
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -58,12 +72,28 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirName
           heirPublicKey: data.heirPublicKey ?? null,
           hasSealed: Boolean(data.hasSealed),
           sealedAt: data.sealedAt ?? null,
+          hasSealedVideo: Boolean(data.hasSealedVideo),
+          sealedVideoAt: data.sealedVideoAt ?? null,
         });
       } else {
-        setState({ enrolled: false, heirPublicKey: null, hasSealed: false, sealedAt: null });
+        setState({
+          enrolled: false,
+          heirPublicKey: null,
+          hasSealed: false,
+          sealedAt: null,
+          hasSealedVideo: false,
+          sealedVideoAt: null,
+        });
       }
     } catch {
-      setState({ enrolled: false, heirPublicKey: null, hasSealed: false, sealedAt: null });
+      setState({
+        enrolled: false,
+        heirPublicKey: null,
+        hasSealed: false,
+        sealedAt: null,
+        hasSealedVideo: false,
+        sealedVideoAt: null,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -113,13 +143,97 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirName
     }
   };
 
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [isSealingVideo, setIsSealingVideo] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [videoStage, setVideoStage] = useState<string | null>(null);
+
+  const handleSelectVideoFile = (file: File | null) => {
+    setFeedback(null);
+    if (file && file.size > MAX_VIDEO_BYTES) {
+      setFeedback({
+        text: `That video is ${(file.size / (1024 * 1024)).toFixed(0)}MB — the limit is ${(MAX_VIDEO_BYTES / (1024 * 1024)).toFixed(0)}MB.`,
+        isError: true,
+      });
+      setVideoFile(null);
+      if (videoInputRef.current) videoInputRef.current.value = "";
+      return;
+    }
+    setVideoFile(file);
+  };
+
+  const handleSealVideo = async () => {
+    if (!selectedHeir || !state?.heirPublicKey || !signMessageAsync) return;
+    if (!videoFile) {
+      setFeedback({ text: "Choose a video first.", isError: true });
+      return;
+    }
+    try {
+      setIsSealingVideo(true);
+      setFeedback(null);
+      setUploadPct(0);
+
+      setVideoStage("Encrypting in your browser…");
+      const plaintext = new Uint8Array(await videoFile.arrayBuffer());
+      const { ephPub, nonce, ciphertext } = sealBytes(plaintext, state.heirPublicKey);
+      const ciphertextHash = sha256Hex(ciphertext);
+
+      setVideoStage("Uploading encrypted video…");
+      const blob = await upload(
+        `sealed-videos/${vaultAddress.toLowerCase()}/${selectedHeir.toLowerCase()}-${Date.now()}.enc`,
+        new Blob([new Uint8Array(ciphertext)]),
+        {
+          access: "public",
+          contentType: "application/octet-stream",
+          handleUploadUrl: "/api/inheritance/video-upload",
+          clientPayload: JSON.stringify({ vaultAddress, heirAddress: selectedHeir, ownerAddress }),
+          onUploadProgress: ({ percentage }) => setUploadPct(percentage),
+        }
+      );
+
+      setVideoStage("Signing…");
+      const video = {
+        ephPub,
+        nonce,
+        blobUrl: blob.url,
+        ciphertextHash,
+        mimeType: videoFile.type || "video/mp4",
+        size: plaintext.byteLength,
+      };
+      const digest = digestVideoMeta(video);
+      const message = buildSealVideoMessage(vaultAddress, selectedHeir, digest);
+      const signature = await signMessageAsync({ message });
+
+      setVideoStage("Saving…");
+      const res = await fetch("/api/inheritance/seal-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vaultAddress, heirAddress: selectedHeir, ownerAddress, video, signature }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to seal video");
+
+      setFeedback({ text: `Video sealed. Only ${nameOf(selectedHeir)} can open it, once the vault passes to them.`, isError: false });
+      setVideoFile(null);
+      if (videoInputRef.current) videoInputRef.current.value = "";
+      loadState(selectedHeir);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to seal video";
+      setFeedback({ text: msg.includes("User rejected") ? "You declined the signature in your wallet." : msg, isError: true });
+    } finally {
+      setIsSealingVideo(false);
+      setVideoStage(null);
+    }
+  };
+
   return (
     <div className="panel-stack">
       <div className="panel-head">
         <div>
           <h3 className="panel-title">Sealed message</h3>
           <p className="panel-lead">
-            Leave a private note for one heir. Only they can open it, and only after the vault passes to them.
+            Leave a private note or video for one heir. Only they can open it, and only after the vault passes to them.
           </p>
         </div>
       </div>
@@ -187,6 +301,52 @@ export function SealedMessagePanel({ vaultAddress, ownerAddress, heirs, heirName
                 </span>
                 <button type="button" onClick={handleSeal} disabled={isSealing || text.trim().length === 0} className="flow-btn">
                   {isSealing ? "Sealing…" : state.hasSealed ? "Replace message" : "Seal message"}
+                </button>
+              </div>
+
+              <div style={{ borderTop: "1px solid var(--border-hairline)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                  Or leave a video{state.hasSealedVideo && state.sealedVideoAt ? ` — replacing the one sealed on ${new Date(state.sealedVideoAt).toLocaleDateString()}` : ""}
+                </span>
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/*"
+                  aria-label="Video message"
+                  disabled={isSealingVideo}
+                  onChange={(e) => handleSelectVideoFile(e.target.files?.[0] ?? null)}
+                  className="flow-input"
+                />
+                {videoFile && (
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                    {videoFile.name} · {(videoFile.size / (1024 * 1024)).toFixed(1)}MB
+                  </span>
+                )}
+                {isSealingVideo && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                      {videoStage}{uploadPct > 0 && uploadPct < 100 ? ` ${uploadPct.toFixed(0)}%` : ""}
+                    </span>
+                    <div style={{ height: 4, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          width: `${uploadPct}%`,
+                          height: "100%",
+                          backgroundColor: "var(--accent-brass)",
+                          transition: "width 0.2s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSealVideo}
+                  disabled={isSealingVideo || !videoFile}
+                  className="flow-btn flow-btn--ghost"
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  {isSealingVideo ? "Sealing video…" : state.hasSealedVideo ? "Replace video" : "Seal video"}
                 </button>
               </div>
             </div>

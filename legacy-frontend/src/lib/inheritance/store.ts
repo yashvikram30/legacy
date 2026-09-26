@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { connectToDatabase } from "@/lib/db/mongodb";
 import { SealedInheritanceModel, ISealedInheritance } from "@/lib/db/models/SealedInheritance";
-import type { SealedBundle } from "./crypto";
+import type { SealedBundle, SealedVideoMeta } from "./crypto";
 
 export interface SealedInheritanceRecord {
   vaultAddress: string;
@@ -11,6 +11,9 @@ export interface SealedInheritanceRecord {
   sealedBundle?: SealedBundle;
   sealedBy?: string;
   sealedAt?: number;
+  sealedVideo?: SealedVideoMeta;
+  sealedVideoBy?: string;
+  sealedVideoAt?: number;
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -68,6 +71,18 @@ function docToRecord(doc: ISealedInheritance): SealedInheritanceRecord {
       : undefined,
     sealedBy: doc.sealedBy,
     sealedAt: doc.sealedAt,
+    sealedVideo: doc.sealedVideo
+      ? {
+          ephPub: doc.sealedVideo.ephPub,
+          nonce: doc.sealedVideo.nonce,
+          blobUrl: doc.sealedVideo.blobUrl,
+          ciphertextHash: doc.sealedVideo.ciphertextHash,
+          mimeType: doc.sealedVideo.mimeType,
+          size: doc.sealedVideo.size,
+        }
+      : undefined,
+    sealedVideoBy: doc.sealedVideoBy,
+    sealedVideoAt: doc.sealedVideoAt,
   };
 }
 
@@ -169,6 +184,47 @@ export async function saveSealedBundle(
     sealedBundle: bundle,
     sealedBy: sealedBy.toLowerCase(),
     sealedAt,
+  };
+  memoryCache.set(key, rec);
+  persistToFile();
+  return rec;
+}
+
+/** Store the owner's sealed video metadata for an already-enrolled heir. The
+ *  ciphertext itself lives in blob storage; only its URL + digest are kept here. */
+export async function saveSealedVideo(
+  vault: string,
+  heir: string,
+  video: SealedVideoMeta,
+  sealedBy: string
+): Promise<SealedInheritanceRecord | null> {
+  const key = keyFor(vault, heir);
+  const sealedVideoAt = Date.now();
+  try {
+    const conn = await connectToDatabase();
+    if (conn) {
+      const doc = await SealedInheritanceModel.findOneAndUpdate(
+        { vaultAddress: vault.toLowerCase(), heirAddress: heir.toLowerCase() },
+        { $set: { sealedVideo: video, sealedVideoBy: sealedBy.toLowerCase(), sealedVideoAt } },
+        { new: true }
+      );
+      if (!doc) return null;
+      const rec = docToRecord(doc);
+      memoryCache.set(key, rec);
+      persistToFile();
+      return rec;
+    }
+  } catch (err) {
+    console.warn("[Inheritance] Mongo video save failed, falling back to file:", err);
+  }
+  loadFromFile();
+  const existing = memoryCache.get(key);
+  if (!existing) return null;
+  const rec: SealedInheritanceRecord = {
+    ...existing,
+    sealedVideo: video,
+    sealedVideoBy: sealedBy.toLowerCase(),
+    sealedVideoAt,
   };
   memoryCache.set(key, rec);
   persistToFile();

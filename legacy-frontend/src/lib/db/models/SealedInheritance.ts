@@ -6,6 +6,16 @@ export interface ISealedBundle {
   ct: string;
 }
 
+/** A sealed video's ciphertext lives in blob storage; only its metadata is stored here. */
+export interface ISealedVideo {
+  ephPub: string;
+  nonce: string;
+  blobUrl: string;
+  ciphertextHash: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface ISealedInheritance extends Document {
   vaultAddress: string;
   heirAddress: string;
@@ -13,6 +23,9 @@ export interface ISealedInheritance extends Document {
   sealedBundle?: ISealedBundle;
   sealedBy?: string;
   sealedAt?: number;
+  sealedVideo?: ISealedVideo;
+  sealedVideoBy?: string;
+  sealedVideoAt?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -26,6 +39,18 @@ const SealedBundleSchema = new Schema<ISealedBundle>(
   { _id: false }
 );
 
+const SealedVideoSchema = new Schema<ISealedVideo>(
+  {
+    ephPub: { type: String, required: true },
+    nonce: { type: String, required: true },
+    blobUrl: { type: String, required: true },
+    ciphertextHash: { type: String, required: true },
+    mimeType: { type: String, required: true },
+    size: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
 const SealedInheritanceSchema = new Schema<ISealedInheritance>(
   {
     vaultAddress: { type: String, required: true, lowercase: true, trim: true, index: true },
@@ -34,6 +59,9 @@ const SealedInheritanceSchema = new Schema<ISealedInheritance>(
     sealedBundle: { type: SealedBundleSchema },
     sealedBy: { type: String, lowercase: true, trim: true },
     sealedAt: { type: Number },
+    sealedVideo: { type: SealedVideoSchema },
+    sealedVideoBy: { type: String, lowercase: true, trim: true },
+    sealedVideoAt: { type: Number },
   },
   { timestamps: true }
 );
