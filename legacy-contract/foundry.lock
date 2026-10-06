@@ -1,0 +1,26 @@
+{
+  "lib/forge-std": {
+    "tag": {
+      "name": "v1.16.2",
+      "rev": "bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
+    }
+  },
+  "lib/world-id-contracts": {
+    "tag": {
+      "name": "v1.0.0",
+      "rev": "f41cd618cadec07a5bc5b66e608df4bc13ffbb54"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "branch": {
+      "name": "master",
+      "rev": "6bc7bf38645e87468779c8118f6ba4b8bc6d4067"
+    }
+  },
+  "lib/ens-contracts": {
+    "branch": {
+      "name": "master",
+      "rev": "160919f5612e52347f016a537c6278ecc0f2325a"
+    }
+  }
+}

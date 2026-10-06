@@ -1,0 +1,20 @@
+{
+  "network": "worldchain-sepolia",
+  "chainId": 4801,
+  "deployer": "0x142A9af3C787aAE7309Ad308a7EA08720c0Cdd68",
+  "contracts": {
+    "WorldIDRouter": "0x57f928158C3EE7CDad1e4D8642503c4D0201f611",
+    "WorldIDVerifierAdapter": "0xbc53b9fa28bbda198aaa93f8a7cc3ef949a5a4d5",
+    "LegacyVaultImplementation": "0x7F0a094E820ec5D1C733EcD96d7022D5AAecD9b9",
+    "LegacyVaultFactory": "0x403985aA74A2501F1a99A858dD36f22F8bfff4c9"
+  },
+  "deploymentTransactions": {
+    "LegacyVaultImplementation": "0xaa50a80e5e2a143df980fb193c4ccf06a4200fb7b001d3180f8eb10a18ede78b",
+    "LegacyVaultFactory": "0x0f1fa7c27a5bd5eb80f933ee8015700e9ddb38664252a41d933fbea33513e681"
+  },
+  "smokeTest": {
+    "cloneVault": "0x7916F4cc4C8d8D410642B3643B9fa5341622d73a",
+    "txHash": "0x75f288881b10cc96e1173a99b2cd0bd57f12adfe9d2af4347b8f962dc3508b2a",
+    "status": "Green"
+  }
+}
