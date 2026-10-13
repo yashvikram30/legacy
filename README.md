@@ -37,7 +37,6 @@ Your assets never leave your wallet. You prove you're alive with your fingerprin
 - [Configuration](#configuration)
 - [Project structure](#project-structure)
 - [Roadmap](#roadmap)
-- [Team](#team)
 - [License](#license)
 
 ---
@@ -394,15 +393,6 @@ legacy/
 - **Private heir lists** — commit heirs and shares as a hash instead of in plain text.
 - **Gasless claims** for heirs who hold no MON, via a relayer or an ERC-4337 paymaster.
 - **Mainnet deployment** and a professional audit.
-
-## Team
-
-Built by [@yashvikram30](https://github.com/yashvikram30), [@Abhist17](https://github.com/Abhist17), [@adi2687](https://github.com/adi2687) and [@sscodings](https://github.com/sscodings).
-
-- **yashvikram30** — the original protocol (vault, factory, guardians, adversarial tests), the app's foundation, dashboard and claim portal, and the sealed-message and notification services.
-- **Abhist17** — the Monad port: passkey liveness verified on-chain, the verifier-hijack fix, live allocation backing, native MON, state-based reads, deployment and end-to-end testing.
-- **adi2687** — email reminders and crons, video messages, and UI work.
-- **sscodings** — the policy engine and the AI will compiler.
 
 ## License
 
