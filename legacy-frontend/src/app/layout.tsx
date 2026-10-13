@@ -6,6 +6,8 @@ import { Footer } from "@/components/Footer";
 import { mursGothic } from "@/lib/fonts";
 
 export const metadata: Metadata = {
+  // Absolute base for the social-card and icon URLs.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://legacy-drab-two.vercel.app"),
   title: "LEGACY · Autonomous Succession Protocol",
   description:
     "Non-custodial crypto inheritance on Monad. Assets never leave your wallet, and you prove you're alive with a passkey verified on-chain. No seed phrase.",
@@ -13,6 +15,12 @@ export const metadata: Metadata = {
     title: "LEGACY · Autonomous Succession Protocol",
     description: "Non-custodial crypto inheritance on Monad, with passkey check-ins verified on-chain.",
     type: "website",
+    siteName: "Legacy",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "LEGACY · Autonomous Succession Protocol",
+    description: "Passkey-native, zero-custody crypto inheritance on Monad.",
   },
   icons: {
     icon: [

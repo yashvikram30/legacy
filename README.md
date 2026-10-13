@@ -1,6 +1,11 @@
 <div align="center">
 
-# Legacy
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="legacy-frontend/public/brand/logo-lockup-on-dark.svg">
+    <img src="legacy-frontend/public/brand/logo-lockup-on-light.svg" alt="Legacy" height="84">
+  </picture>
+</h1>
 
 **Passkey-native, zero-custody crypto inheritance on Monad.**
 

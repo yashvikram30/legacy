@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
@@ -308,9 +309,10 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
       {/* ── Minimal Footer ───────────────────────────────────── */}
       <footer className="landing-footer-shell" role="contentinfo">
         <div className="landing-footer-inner">
-          <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <Image src="/brand/logo-glyph-on-dark.svg" alt="" width={18} height={18} unoptimized style={{ verticalAlign: "middle" }} />
             <span style={{ fontWeight: 800, color: "#ffffff", letterSpacing: "0.06em" }}>LEGACY PROTOCOL</span>
-            <span style={{ margin: "0 10px" }}>·</span>
+            <span>·</span>
             <span>{CHAIN_NAME.toUpperCase()} (CHAIN ID {activeChain.id})</span>
           </div>
 

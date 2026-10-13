@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain, useReadContract } from "wagmi";
@@ -109,6 +110,7 @@ export function Header() {
             style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "10px" }}
             aria-label="Legacy Home"
           >
+            <Image src="/brand/logo-glyph-on-dark.svg" alt="" width={28} height={28} priority unoptimized />
             <span
               style={{
                 fontFamily: "'Murs Gothic', var(--font-murs-gothic), sans-serif",
