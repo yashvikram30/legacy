@@ -132,7 +132,7 @@ Open [http://localhost:3000](http://localhost:3000). Passkeys work on `localhost
 
 | Network | Factory | Passkey verifier | Policy engine | Deploy tx |
 | :--- | :--- | :--- | :--- | :--- |
-| Monad testnet (10143) | _to fill after deploy_ | | | |
+| Monad testnet (10143) | [`0xee99…eacf`](https://testnet.monadscan.com/address/0xee99be33c48c1362e66fb3db773018db1cc1eacf) | [`0xe72d…2314`](https://testnet.monadscan.com/address/0xe72de0e5279429b097d2ca03ab95ec315d022314) | [`0xc94e…ed06`](https://testnet.monadscan.com/address/0xc94efc123dde0e590882f261996b65c5f018ed06) | [`0xaa922f49…`](https://testnet.monadscan.com/tx/0xaa922f4994e19fcf368212feba80e6bf0cab38df1bbfe2f7973014af5e9b4c9e) |
 | Monad mainnet (143) | _to fill after deploy_ | | | |
 
 ---
