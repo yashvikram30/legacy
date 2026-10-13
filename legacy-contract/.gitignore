@@ -8,7 +8,6 @@ cache_forge/
 # Submodules in lib/ tracked via .gitmodules
 lib/*
 !lib/forge-std
-!lib/world-id-contracts
 !lib/ens-contracts
 !lib/openzeppelin-contracts
 flattened/
