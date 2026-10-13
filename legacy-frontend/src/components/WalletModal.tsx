@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useDialogBehavior } from "@/hooks/useDialogBehavior";
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId } from "wagmi";
-import { worldChainSepolia } from "@/lib/constants";
+import { activeChain, explorerAddressUrl, CHAIN_NAME, EXPLORER_NAME } from "@/lib/constants";
 
 import { appKit } from "@/lib/reown";
 
@@ -170,7 +170,7 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
                   Connect Wallet
                 </h2>
                 <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "4px" }}>
-                  World Chain Sepolia · Powered by MetaMask Connect
+                  {CHAIN_NAME} · Powered by MetaMask Connect
                 </p>
               </div>
               <button
@@ -473,7 +473,7 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
                 </button>
 
                 <a
-                  href={`https://sepolia.worldscan.org/address/${address}`}
+                  href={explorerAddressUrl(address)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-secondary"
@@ -493,7 +493,7 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
                     <polyline points="15 3 21 3 21 9"/>
                     <line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                  Worldscan
+                  {EXPLORER_NAME}
                 </a>
               </div>
             </div>
@@ -514,12 +514,12 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
                 <span
                   className="network-dot"
                   style={{
-                    backgroundColor: chainId === worldChainSepolia.id ? "var(--status-green)" : "var(--status-red)",
+                    backgroundColor: chainId === activeChain.id ? "var(--status-green)" : "var(--status-red)",
                   }}
                 />
                 <div>
                   <div style={{ fontSize: "0.875rem", fontWeight: 500 }}>
-                    {chainId === worldChainSepolia.id ? "World Chain Sepolia" : "Unsupported Network"}
+                    {chainId === activeChain.id ? CHAIN_NAME : "Unsupported Network"}
                   </div>
                   <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
                     Chain ID: {chainId}
@@ -527,10 +527,10 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              {chainId !== worldChainSepolia.id && (
+              {chainId !== activeChain.id && (
                 <button
                   type="button"
-                  onClick={() => switchChainAsync({ chainId: worldChainSepolia.id })}
+                  onClick={() => switchChainAsync({ chainId: activeChain.id })}
                   disabled={isSwitching}
                   className="btn-brass"
                   style={{ fontSize: "0.75rem", padding: "6px 12px" }}

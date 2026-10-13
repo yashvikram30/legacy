@@ -16,19 +16,25 @@ import {
   isAddress,
   keccak256,
   stringToHex,
+  parseAbi,
 } from "viem";
-import { VaultStatus, worldChainSepolia } from "@/lib/constants";
+import { VaultStatus, activeChain, CHAIN_NAME, CHAIN_TOKENS } from "@/lib/constants";
 import { ERC20ABI, ERC20AdapterABI, ERC20AdapterBytecode } from "@/lib/contracts/adapters";
+import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { AddressChip } from "./AddressChip";
 import { Skeleton } from "./Skeleton";
+import { AllocationHealthBadge, AllocationReadinessBanner } from "./AllocationHealth";
+import type { AllocationHealthMap, AllocationReadiness, VaultAllocation } from "@/lib/allocations";
 
 export interface AssetRecord {
   assetId: `0x${string}`;
   label: string;
-  assetType: "ERC20" | "ERC721" | "ENS";
+  assetType: "ERC20" | "ERC721" | "ENS" | "CUSTOM";
   heir: `0x${string}`;
   executor: `0x${string}`;
   executed: boolean;
+  /** The on-chain allocation this row was loaded from, used for health checks. */
+  allocation?: VaultAllocation;
 }
 
 interface AssetListProps {
@@ -43,10 +49,16 @@ interface AssetListProps {
   ) => Promise<void>;
   onRemoveAsset: (assetId: `0x${string}`) => Promise<void>;
   vaultAddress?: `0x${string}`;
+  /** Live "would this pay out today?" state per allocation. */
+  health?: AllocationHealthMap;
+  readiness?: AllocationReadiness;
+  isCheckingHealth?: boolean;
+  /** Re-grants the executor's approval for an allocation that lost it. */
+  onRestoreApproval?: (assetId: `0x${string}`) => Promise<void>;
 }
 
 export interface TokenItem {
-  address?: `0x${string}`; // undefined for Native ETH
+  address?: `0x${string}`; // undefined for native MON
   name: string;
   symbol: string;
   decimals: number;
@@ -58,20 +70,32 @@ export interface TokenItem {
 
 const DEFAULT_TOKENS: TokenItem[] = [
   {
-    name: "Native Ether",
-    symbol: "ETH",
+    name: "Monad",
+    symbol: "MON",
     decimals: 18,
     isNative: true,
   },
   {
-    address: "0x66145f38cBAC35Ca6F1Dfb4914dF98F1614aeA88",
+    address: CHAIN_TOKENS.wrappedNative,
+    name: "Wrapped MON",
+    symbol: "WMON",
+    decimals: 18,
+  },
+  {
+    address: CHAIN_TOKENS.usdc,
     name: "USD Coin (Circle)",
     symbol: "USDC",
     decimals: 6,
   },
 ];
 
-const STORAGE_KEY = "legacy_imported_tokens_4801";
+const STORAGE_KEY = `legacy_imported_tokens_${activeChain.id}`;
+
+const wrappedNativeAbi = parseAbi(["function deposit() payable"]);
+
+// MON kept back when allocating native MON, so the owner can still pay gas
+// for the wrap, adapter deployment, approval and assignment transactions.
+const NATIVE_GAS_RESERVE = parseUnits("0.05", 18);
 
 export function AssetList({
   assets,
@@ -80,6 +104,10 @@ export function AssetList({
   onAssignAsset,
   onRemoveAsset,
   vaultAddress,
+  health,
+  readiness,
+  isCheckingHealth,
+  onRestoreApproval,
 }: AssetListProps) {
   const { address } = useAccount();
   const publicClient = usePublicClient();
@@ -89,7 +117,7 @@ export function AssetList({
   // Native ETH balance via wagmi
   const { data: ethBalance, isLoading: isEthLoading } = useBalance({
     address,
-    chainId: worldChainSepolia.id,
+    chainId: activeChain.id,
   });
 
   // Modal display states
@@ -116,11 +144,8 @@ export function AssetList({
     return DEFAULT_TOKENS;
   });
 
-  // Start on the first token that can actually be assigned (native ETH can't be), so the dialog opens ready to use
-  const [selectedTokenIndex, setSelectedTokenIndex] = useState<number>(() => {
-    const firstAssignable = DEFAULT_TOKENS.findIndex((t) => !t.isNative);
-    return firstAssignable === -1 ? 0 : firstAssignable;
-  });
+  // Start on native MON, the asset most owners hold.
+  const [selectedTokenIndex, setSelectedTokenIndex] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [tokenFilter, setTokenFilter] = useState<"ALL" | "IN_WALLET">("ALL");
 
@@ -141,7 +166,15 @@ export function AssetList({
   // Orchestration state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executionStage, setExecutionStage] = useState<string | null>(null);
+  // A token allocation that got as far as a deployed, approved adapter but
+  // could not be registered (e.g. the vault's check-in window lapsed midway).
+  // Retrying the same allocation reuses it instead of wrapping and deploying again.
+  const [pendingAdapter, setPendingAdapter] = useState<{ key: string; adapter: `0x${string}` } | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  // Errors from table actions (remove, re-approve), shown beside the table:
+  // `errorText` only renders inside the assignment dialog.
+  const [tableError, setTableError] = useState<string | null>(null);
+  const [restoringAssetId, setRestoringAssetId] = useState<`0x${string}` | null>(null);
 
   const isGreen = vaultStatus === VaultStatus.Green;
 
@@ -173,7 +206,7 @@ export function AssetList({
         abi: ERC20ABI,
         functionName: "balanceOf" as const,
         args: [address] as const,
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
       }));
   }, [address, tokenList]);
 
@@ -310,7 +343,7 @@ export function AssetList({
   // Token mode needs an assignable token and a positive amount before the confirm button wakes up
   const isTokenFormIncomplete =
     modalMode === "TOKENS"
-      ? Boolean(selectedToken?.isNative) || !(Number(amount) > 0)
+      ? !(Number(amount) > 0)
       : !manualLabel.trim() || !isAddress(manualExecutorAddress.trim());
 
   // Filtered tokens for token picker
@@ -362,6 +395,19 @@ export function AssetList({
       return;
     }
 
+    // The vault only accepts assignments while it is active (Green). Check
+    // before asking for any transaction, so a lapsed check-in never costs the
+    // owner a wrap, a deployment and an approval first.
+    if (publicClient && vaultAddress) {
+      const status = await publicClient
+        .readContract({ address: vaultAddress, abi: LegacyVaultABI, functionName: "getStatus" })
+        .catch(() => undefined);
+      if (status !== undefined && Number(status) !== VaultStatus.Green) {
+        setErrorText("Your vault isn't active because a check-in is overdue. Check in first, then assign assets.");
+        return;
+      }
+    }
+
     // Branch 1: Advanced / Custom Executor
     if (modalMode === "EXECUTOR") {
       if (!manualLabel.trim() || !manualExecutorAddress.trim()) {
@@ -400,18 +446,13 @@ export function AssetList({
       return;
     }
 
-    // Branch 2: Native ETH
-    if (selectedToken.isNative) {
-      setErrorText(
-        "World Chain Sepolia requires an ERC-20 token allowance for automated non-custodial succession. Please select testnet USDC or wrap your ETH into WETH."
-      );
-      return;
-    }
-
-    // Branch 3: ERC-20 Token
-    const tokenAddr = selectedToken.address;
-    const tokenSymbol = selectedToken.symbol;
-    const tokenDecimals = selectedToken.decimals;
+    // Branch 2: ERC-20 token, or native MON. Native balances can't be approved,
+    // so MON is wrapped 1:1 into WMON first (it stays in the owner's wallet) and
+    // then allocated exactly like any other ERC-20.
+    const wrapNative = Boolean(selectedToken.isNative);
+    const tokenAddr = wrapNative ? CHAIN_TOKENS.wrappedNative : selectedToken.address;
+    const tokenSymbol = wrapNative ? "WMON" : selectedToken.symbol;
+    const tokenDecimals = wrapNative ? 18 : selectedToken.decimals;
     const currentBalance = selectedToken.balance ?? 0n;
 
     if (!tokenAddr) {
@@ -438,63 +479,84 @@ export function AssetList({
       setIsSubmitting(true);
       const parsedAmount = parseUnits(amount, tokenDecimals);
 
-      if (parsedAmount > currentBalance) {
+      if (wrapNative ? parsedAmount + NATIVE_GAS_RESERVE > currentBalance : parsedAmount > currentBalance) {
         setErrorText(
-          `Allocation amount (${amount} ${tokenSymbol}) exceeds detected wallet balance. The vault owner must hold tokens for succession claims to be executable.`
+          wrapNative
+            ? `Allocation amount (${amount} MON) leaves too little MON for gas. Keep at least 0.05 MON in your wallet.`
+            : `Allocation amount (${amount} ${tokenSymbol}) exceeds detected wallet balance. The vault owner must hold tokens for succession claims to be executable.`
         );
         setIsSubmitting(false);
         return;
       }
 
-      // Step 1: Deploy ERC20Adapter
-      setExecutionStage(`[1/3] Deploying Non-Custodial ERC20Adapter for ${amount} ${tokenSymbol}...`);
-      console.log("👉 Deploying ERC20Adapter:", {
-        token: tokenAddr,
-        amount: parsedAmount.toString(),
-        vault: vaultAddress,
-      });
+      const allocationKey = `${tokenAddr}:${parsedAmount}:${selectedHeir}`.toLowerCase();
+      const reusableAdapter = pendingAdapter?.key === allocationKey ? pendingAdapter.adapter : null;
 
-      const deployHash = await walletClient.deployContract({
-        abi: ERC20AdapterABI,
-        bytecode: ERC20AdapterBytecode,
-        args: [tokenAddr, parsedAmount, vaultAddress],
-        chain: worldChainSepolia,
-        account: address,
-      });
-
-      console.log("⏳ ERC20Adapter deployment tx broadcast:", deployHash);
-      setExecutionStage("[1/3] Awaiting adapter deployment confirmation on World Chain Sepolia...");
-
-      const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
-      const adapterAddress = deployReceipt.contractAddress;
-
-      if (!adapterAddress) {
-        throw new Error("Adapter deployment succeeded but contract address was not returned.");
+      if (wrapNative && !reusableAdapter) {
+        setExecutionStage(`Wrapping ${amount} MON into WMON (it stays in your wallet)...`);
+        const wrapHash = await writeContractAsync({
+          chainId: activeChain.id,
+          address: tokenAddr,
+          abi: wrappedNativeAbi,
+          functionName: "deposit",
+          value: parsedAmount,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: wrapHash });
       }
-      console.log("✅ ERC20Adapter deployed at:", adapterAddress);
 
-      // Step 2: Approve the newly deployed adapter
-      setExecutionStage(`[2/3] Authorizing ${amount} ${tokenSymbol} allowance for executor...`);
+      let adapterAddress = reusableAdapter;
+      if (!adapterAddress) {
+        // Step 1: Deploy ERC20Adapter
+        setExecutionStage(`[1/3] Deploying Non-Custodial ERC20Adapter for ${amount} ${tokenSymbol}...`);
+        console.log("👉 Deploying ERC20Adapter:", {
+          token: tokenAddr,
+          amount: parsedAmount.toString(),
+          vault: vaultAddress,
+        });
 
-      const currentAllowance = await publicClient.readContract({
-        address: tokenAddr,
-        abi: ERC20ABI,
-        functionName: "allowance",
-        args: [address, adapterAddress],
-      });
+        const deployHash = await walletClient.deployContract({
+          abi: ERC20AdapterABI,
+          bytecode: ERC20AdapterBytecode,
+          args: [tokenAddr, parsedAmount, vaultAddress],
+          chain: activeChain,
+          account: address,
+        });
 
-      if (currentAllowance < parsedAmount) {
-        console.log("👉 Prompting approval for adapter:", adapterAddress);
-        const approveHash = await writeContractAsync({
-          chainId: worldChainSepolia.id,
+        console.log("⏳ ERC20Adapter deployment tx broadcast:", deployHash);
+        setExecutionStage(`[1/3] Awaiting adapter deployment confirmation on ${CHAIN_NAME}...`);
+
+        const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+        adapterAddress = deployReceipt.contractAddress ?? null;
+
+        if (!adapterAddress) {
+          throw new Error("Adapter deployment succeeded but contract address was not returned.");
+        }
+        console.log("✅ ERC20Adapter deployed at:", adapterAddress);
+
+        // Step 2: Approve the newly deployed adapter
+        setExecutionStage(`[2/3] Authorizing ${amount} ${tokenSymbol} allowance for executor...`);
+
+        const currentAllowance = await publicClient.readContract({
           address: tokenAddr,
           abi: ERC20ABI,
-          functionName: "approve",
-          args: [adapterAddress, parsedAmount],
+          functionName: "allowance",
+          args: [address, adapterAddress],
         });
-        console.log("⏳ Approval tx broadcast:", approveHash);
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
-        console.log("✅ Token allowance confirmed");
+
+        if (currentAllowance < parsedAmount) {
+          console.log("👉 Prompting approval for adapter:", adapterAddress);
+          const approveHash = await writeContractAsync({
+            chainId: activeChain.id,
+            address: tokenAddr,
+            abi: ERC20ABI,
+            functionName: "approve",
+            args: [adapterAddress, parsedAmount],
+          });
+          console.log("⏳ Approval tx broadcast:", approveHash);
+          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+          console.log("✅ Token allowance confirmed");
+        }
+        setPendingAdapter({ key: allocationKey, adapter: adapterAddress });
       }
 
       // Step 3: Register asset on LegacyVault
@@ -505,13 +567,19 @@ export function AssetList({
         stringToHex(`${assetLabel}-${selectedHeir}-${adapterAddress}`)
       );
 
-      await onAssignAsset(
-        assetId,
-        selectedHeir as `0x${string}`,
-        adapterAddress,
-        assetLabel
-      );
+      try {
+        await onAssignAsset(assetId, selectedHeir as `0x${string}`, adapterAddress, assetLabel);
+      } catch (assignErr) {
+        const msg = assignErr instanceof Error ? assignErr.message : "";
+        if (/not (in )?green|Red status|Amber status|HeirChangesLocked/i.test(msg)) {
+          throw new Error(
+            "Your check-in window ran out while this was being set up. Check in, then press the button again: the wrapped tokens and the adapter are reused, nothing is repeated."
+          );
+        }
+        throw assignErr;
+      }
 
+      setPendingAdapter(null);
       setShowAssignModal(false);
       resetForm();
     } catch (err: unknown) {
@@ -544,13 +612,27 @@ export function AssetList({
   const handleRemove = async (assetId: `0x${string}`) => {
     try {
       setIsSubmitting(true);
-      setErrorText(null);
+      setTableError(null);
       await onRemoveAsset(assetId);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to remove asset";
-      setErrorText(msg);
+      setTableError(msg);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRestoreApproval = async (assetId: `0x${string}`) => {
+    if (!onRestoreApproval) return;
+    try {
+      setRestoringAssetId(assetId);
+      setTableError(null);
+      await onRestoreApproval(assetId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to re-approve asset";
+      setTableError(msg);
+    } finally {
+      setRestoringAssetId(null);
     }
   };
 
@@ -657,6 +739,15 @@ export function AssetList({
           )}
         </div>
       ) : (
+        <div>
+          {readiness && (
+            <AllocationReadinessBanner readiness={readiness} perspective="owner" isLoading={isCheckingHealth} />
+          )}
+          {tableError && (
+            <p role="alert" style={{ color: "var(--status-red)", fontSize: "0.8125rem", margin: "0 0 12px" }}>
+              {tableError}
+            </p>
+          )}
         <div
           style={{
             border: "1px solid rgba(255, 255, 255, 0.15)",
@@ -700,22 +791,32 @@ export function AssetList({
                     <AddressChip address={asset.executor} truncate badge="" size="sm" />
                   </td>
                   <td>
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: 0,
-                        fontSize: "0.75rem",
-                        fontWeight: 600,
-                        backgroundColor: asset.executed
-                          ? "rgba(154, 158, 152, 0.2)"
-                          : "rgba(184, 137, 74, 0.18)",
-                        color: asset.executed
-                          ? "var(--text-secondary)"
-                          : "var(--accent-brass)",
-                      }}
-                    >
-                      {asset.executed ? "Claimed" : "Assigned"}
-                    </span>
+                    {asset.allocation ? (
+                      <AllocationHealthBadge
+                        allocation={asset.allocation}
+                        health={health?.[asset.assetId]}
+                        perspective="owner"
+                        onRestoreApproval={onRestoreApproval ? () => handleRestoreApproval(asset.assetId) : undefined}
+                        isRestoring={restoringAssetId === asset.assetId}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          padding: "3px 8px",
+                          borderRadius: 0,
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          backgroundColor: asset.executed
+                            ? "rgba(154, 158, 152, 0.2)"
+                            : "rgba(184, 137, 74, 0.18)",
+                          color: asset.executed
+                            ? "var(--text-secondary)"
+                            : "var(--accent-brass)",
+                        }}
+                      >
+                        {asset.executed ? "Claimed" : "Assigned"}
+                      </span>
+                    )}
                   </td>
                   {isGreen && (
                     <td style={{ textAlign: "right" }}>
@@ -740,6 +841,7 @@ export function AssetList({
               ))}
             </tbody>
           </table>
+        </div>
         </div>
       )}
 
@@ -818,7 +920,7 @@ export function AssetList({
                       fontWeight: 700,
                     }}
                   >
-                    World Chain Sepolia
+                    {CHAIN_NAME}
                   </span>
                 </div>
                 <h3
@@ -1304,7 +1406,7 @@ export function AssetList({
                               </div>
                               <div style={{ fontSize: "0.6875rem", color: "var(--text-secondary)", marginTop: "2px" }}>
                                 {selectedToken?.isNative
-                                  ? "Native Gas Asset (World Chain Sepolia)"
+                                  ? `Native gas asset on ${CHAIN_NAME} · wrapped to WMON automatically`
                                   : `Contract: ${selectedToken?.address?.slice(0, 8)}...${selectedToken?.address?.slice(-6)}`}
                               </div>
                             </div>
@@ -1332,7 +1434,7 @@ export function AssetList({
                         </div>
                       </div>
 
-                      {/* Native ETH not supported for automated succession */}
+                      {/* Native MON is wrapped to WMON before allocation */}
                       {selectedToken?.isNative && (
                         <div
                           style={{
@@ -1344,7 +1446,7 @@ export function AssetList({
                             lineHeight: 1.4,
                           }}
                         >
-                          Native ETH isn&apos;t supported for succession allocation. Select <strong>testnet USDC</strong> or wrap ETH to <strong>WETH</strong> to continue.
+                          MON is wrapped 1:1 into <strong>WMON</strong> first, in your own wallet. Nothing leaves your wallet: the vault only gets permission to pass it on.
                         </div>
                       )}
 
@@ -1678,7 +1780,7 @@ export function AssetList({
                     <button
                       type="submit"
                       disabled={isSubmitting || isTokenFormIncomplete}
-                      title={isTokenFormIncomplete && !selectedToken?.isNative ? "Fill in every field to continue" : undefined}
+                      title={isTokenFormIncomplete ? "Fill in every field to continue" : undefined}
                       className="btn-brass"
                       style={{
                         flex: 2,

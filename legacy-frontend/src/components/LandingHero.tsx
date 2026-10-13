@@ -4,10 +4,10 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
-import { CONTRACT_ADDRESSES } from "@/lib/constants";
+import { CONTRACT_ADDRESSES, explorerAddressUrl, CHAIN_NAME, activeChain } from "@/lib/constants";
 
 const HERO_FACTS = [
-  { value: "1 SCAN", label: "World ID proves you're alive" },
+  { value: "1 TOUCH", label: "Your passkey proves you're alive" },
   { value: "0 CUSTODIANS", label: "Nobody else holds your assets" },
   { value: "100% ON-CHAIN", label: "Rules enforced by smart contracts" },
 ];
@@ -16,7 +16,7 @@ const LIFECYCLE_STEPS = [
   {
     tone: "green",
     name: "YOU'RE ACTIVE",
-    desc: "Check in with World ID on your own schedule. Everything stays yours.",
+    desc: "Check in with your fingerprint or face, on your own schedule. Everything stays yours.",
     next: "Each check-in resets the clock",
   },
   {
@@ -46,8 +46,8 @@ const iconProps = {
 
 const SAFETY_FEATURES = [
   {
-    title: "PRIVATE PROOF OF LIFE",
-    desc: "World ID confirms you're a real, living person without revealing who you are.",
+    title: "PROOF OF LIFE, NO SEED PHRASE",
+    desc: "A passkey on your own device proves it's you. The vault verifies it on-chain, so no server or third party is involved.",
     icon: (
       <svg {...iconProps}>
         <circle cx="12" cy="12" r="9" />
@@ -270,7 +270,7 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
           <h2 id="arch-title" className="section-title">
             NO MIDDLEMEN. NO SURPRISES.
           </h2>
-          <p className="section-lead">Smart contracts on World Chain enforce every rule. No lawyers, custodians, or multisigs.</p>
+          <p className="section-lead">Smart contracts on {CHAIN_NAME} enforce every rule. No lawyers, custodians, or multisigs.</p>
         </div>
 
         <div className="arch-grid">
@@ -311,7 +311,7 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
           <div>
             <span style={{ fontWeight: 800, color: "#ffffff", letterSpacing: "0.06em" }}>LEGACY PROTOCOL</span>
             <span style={{ margin: "0 10px" }}>·</span>
-            <span>WORLD CHAIN SEPOLIA (CHAIN ID 4801)</span>
+            <span>{CHAIN_NAME.toUpperCase()} (CHAIN ID {activeChain.id})</span>
           </div>
 
           <div className="landing-footer-links">
@@ -325,14 +325,14 @@ export function LandingHero({ onOpenVault, hasVaults = false }: LandingHeroProps
             <Link href="/claim">Heir Portal</Link>
             <Link href="/lookup">Lookup</Link>
             <a
-              href={`https://sepolia.worldscan.org/address/${CONTRACT_ADDRESSES.factory}`}
+              href={explorerAddressUrl(CONTRACT_ADDRESSES.factory)}
               target="_blank"
               rel="noopener noreferrer"
             >
               Factory Contract ↗
             </a>
             <a
-              href={`https://sepolia.worldscan.org/address/${CONTRACT_ADDRESSES.verifier}`}
+              href={explorerAddressUrl(CONTRACT_ADDRESSES.verifier)}
               target="_blank"
               rel="noopener noreferrer"
             >

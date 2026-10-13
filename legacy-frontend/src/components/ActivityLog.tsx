@@ -2,8 +2,42 @@
 
 import React, { useEffect, useState } from "react";
 import { usePublicClient } from "wagmi";
-import { parseAbiItem } from "viem";
-import { VaultStatus } from "@/lib/constants";
+import { parseAbiItem, type PublicClient } from "viem";
+import { VaultStatus, explorerAddressUrl, explorerTxUrl, CHAIN_NAME } from "@/lib/constants";
+
+// Public Monad RPCs cap eth_getLogs at a 100-block range, so recent history is
+// read in 100-block windows; the explorer link has everything older.
+const LOG_WINDOW = 100n;
+const RECENT_WINDOWS = 30; // ~3,000 blocks, about 20 minutes at Monad's 400ms blocks
+const WINDOWS_IN_FLIGHT = 5; // stay well inside public RPC rate limits
+
+const activityEvents = [
+  parseAbiItem("event CheckedIn(uint256 timestamp)"),
+  parseAbiItem("event HeirAdded(address indexed heir)"),
+  parseAbiItem("event ParametersUpdated(uint256 checkInInterval, uint256 gracePeriod, uint256 contestableWindow)"),
+] as const;
+
+async function fetchRecentVaultLogs(client: PublicClient, vault: `0x${string}`) {
+  const latest = await client.getBlockNumber();
+  const windows: [bigint, bigint][] = [];
+  for (let i = 0; i < RECENT_WINDOWS; i++) {
+    const toBlock = latest - BigInt(i) * LOG_WINDOW;
+    if (toBlock < 0n) break;
+    const fromBlock = toBlock >= LOG_WINDOW - 1n ? toBlock - (LOG_WINDOW - 1n) : 0n;
+    windows.push([fromBlock, toBlock]);
+  }
+
+  const logs = [];
+  for (let i = 0; i < windows.length; i += WINDOWS_IN_FLIGHT) {
+    const batch = await Promise.all(
+      windows.slice(i, i + WINDOWS_IN_FLIGHT).map(([fromBlock, toBlock]) =>
+        client.getLogs({ address: vault, events: activityEvents, fromBlock, toBlock }).catch(() => [])
+      )
+    );
+    logs.push(...batch.flat());
+  }
+  return logs;
+}
 
 interface ActivityItem {
   id: string;
@@ -42,71 +76,44 @@ export function ActivityLog({
       const items: ActivityItem[] = [];
 
       try {
-        // Query CheckedIn events
-        const checkedInLogs = await publicClient.getLogs({
-          address: vaultAddress,
-          event: parseAbiItem("event CheckedIn(uint256 timestamp)"),
-          fromBlock: "earliest",
-          toBlock: "latest",
-        });
-
-        for (const l of checkedInLogs) {
-          const ts = l.args.timestamp ? Number(l.args.timestamp) : Math.floor(Date.now() / 1000);
-          items.push({
-            id: `checkin-${l.transactionHash}-${l.logIndex}`,
-            type: "CHECK_IN",
-            title: "LIVENESS HEARTBEAT VERIFIED",
-            description: "Heartbeat check-in verified via World ID on World Chain.",
-            timestamp: ts,
-            blockNumber: l.blockNumber,
-            transactionHash: l.transactionHash,
-            badgeColor: "var(--status-green)",
-          });
-        }
-
-        // Query HeirAdded events
-        const heirAddedLogs = await publicClient.getLogs({
-          address: vaultAddress,
-          event: parseAbiItem("event HeirAdded(address indexed heir)"),
-          fromBlock: "earliest",
-          toBlock: "latest",
-        });
-
-        for (const l of heirAddedLogs) {
-          items.push({
-            id: `heir-add-${l.transactionHash}-${l.logIndex}`,
-            type: "HEIR_CHANGE",
-            title: "HEIR ADDED",
-            description: `Heir address ${l.args.heir?.slice(0, 8)}…${l.args.heir?.slice(-6)} authorized for succession claims.`,
-            timestamp: Math.floor(Date.now() / 1000),
-            blockNumber: l.blockNumber,
-            transactionHash: l.transactionHash,
-            badgeColor: "var(--accent-brass)",
-          });
-        }
-
-        // Query Parameter changes
-        const paramLogs = await publicClient.getLogs({
-          address: vaultAddress,
-          event: parseAbiItem("event ParametersUpdated(uint256 checkInInterval, uint256 gracePeriod, uint256 contestableWindow)"),
-          fromBlock: "earliest",
-          toBlock: "latest",
-        });
-
-        for (const l of paramLogs) {
-          items.push({
-            id: `param-${l.transactionHash}-${l.logIndex}`,
-            type: "PARAMETER_UPDATE",
-            title: "TIMELOCK PARAMETERS UPDATED",
-            description: `Cadence configured to ${Math.round(Number(l.args.checkInInterval || 0n) / 86400)}d cadence / ${Math.round(Number(l.args.gracePeriod || 0n) / 86400)}d grace.`,
-            timestamp: Math.floor(Date.now() / 1000),
-            blockNumber: l.blockNumber,
-            transactionHash: l.transactionHash,
-            badgeColor: "var(--accent-brass)",
-          });
+        for (const l of await fetchRecentVaultLogs(publicClient, vaultAddress)) {
+          if (l.eventName === "CheckedIn") {
+            items.push({
+              id: `checkin-${l.transactionHash}-${l.logIndex}`,
+              type: "CHECK_IN",
+              title: "LIVENESS HEARTBEAT VERIFIED",
+              description: `Passkey check-in verified on-chain on ${CHAIN_NAME}.`,
+              timestamp: Number(l.args.timestamp ?? BigInt(Math.floor(Date.now() / 1000))),
+              blockNumber: l.blockNumber,
+              transactionHash: l.transactionHash,
+              badgeColor: "var(--status-green)",
+            });
+          } else if (l.eventName === "HeirAdded") {
+            items.push({
+              id: `heir-add-${l.transactionHash}-${l.logIndex}`,
+              type: "HEIR_CHANGE",
+              title: "HEIR ADDED",
+              description: `Heir address ${l.args.heir?.slice(0, 8)}…${l.args.heir?.slice(-6)} authorized for succession claims.`,
+              timestamp: Math.floor(Date.now() / 1000),
+              blockNumber: l.blockNumber,
+              transactionHash: l.transactionHash,
+              badgeColor: "var(--accent-brass)",
+            });
+          } else if (l.eventName === "ParametersUpdated") {
+            items.push({
+              id: `param-${l.transactionHash}-${l.logIndex}`,
+              type: "PARAMETER_UPDATE",
+              title: "TIMELOCK PARAMETERS UPDATED",
+              description: `Cadence configured to ${Math.round(Number(l.args.checkInInterval || 0n) / 86400)}d cadence / ${Math.round(Number(l.args.gracePeriod || 0n) / 86400)}d grace.`,
+              timestamp: Math.floor(Date.now() / 1000),
+              blockNumber: l.blockNumber,
+              transactionHash: l.transactionHash,
+              badgeColor: "var(--accent-brass)",
+            });
+          }
         }
       } catch {
-        // RPC getLogs may be rate-limited or restricted on tenderly; fall back gracefully
+        // Logs are best-effort history; the explorer link always has the full record.
       }
 
       // If registered, synthesize initial registration proof if no getLogs returned it
@@ -114,8 +121,8 @@ export function ActivityLog({
         items.push({
           id: `initial-registration-${vaultAddress}`,
           type: "REGISTER",
-          title: "INITIAL LIVENESS REGISTERED & BOUND",
-          description: "World ID verified and linked to vault on World Chain.",
+          title: "PASSKEY LINKED TO VAULT",
+          description: `Passkey verified and linked to this vault on ${CHAIN_NAME}.`,
           timestamp: lastCheckIn > 0n ? Number(lastCheckIn) : Math.floor(Date.now() / 1000),
           badgeColor: "var(--status-green)",
         });
@@ -179,13 +186,13 @@ export function ActivityLog({
             Activity & Proof History
           </h3>
           <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginTop: "4px", lineHeight: 1.5 }}>
-            Immutable on-chain event log documenting biometric heartbeats, parameter changes, and claim ceremonies.
+            Recent on-chain activity: passkey check-ins, heirs and parameter changes. Full history is on the explorer.
           </p>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <a
-            href={`https://sepolia.worldscan.org/address/${vaultAddress}#events`}
+            href={`${explorerAddressUrl(vaultAddress)}#events`}
             target="_blank"
             rel="noopener noreferrer"
             className="btn-secondary"
@@ -200,7 +207,7 @@ export function ActivityLog({
       {isLoading ? (
         <div style={{ padding: "48px 32px", textAlign: "center", backgroundColor: "rgba(255, 255, 255, 0.01)" }}>
           <span className="font-data" style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
-            Querying World Chain Sepolia logs…
+            Querying {CHAIN_NAME} logs…
           </span>
         </div>
       ) : logs.length === 0 ? (
@@ -276,7 +283,7 @@ export function ActivityLog({
                 )}
                 {item.transactionHash && (
                   <a
-                    href={`https://sepolia.worldscan.org/tx/${item.transactionHash}`}
+                    href={explorerTxUrl(item.transactionHash)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-data"

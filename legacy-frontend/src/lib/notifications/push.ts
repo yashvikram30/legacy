@@ -1,3 +1,5 @@
+import { activeChain } from "@/lib/constants";
+
 export interface PushAlertPayload {
   recipientAddress: `0x${string}`;
   title: string;
@@ -36,7 +38,7 @@ export async function sendPushNotification(
     const { ethers } = (await dynamicImport("ethers")) as any;
 
     const signer = new ethers.Wallet(privateKey);
-    const chainId = process.env.NEXT_PUBLIC_CHAIN_ID || "4801"; // World Chain Sepolia
+    const chainId = process.env.NEXT_PUBLIC_CHAIN_ID || String(activeChain.id);
 
     await PushAPI.payloads.sendNotification({
       signer,

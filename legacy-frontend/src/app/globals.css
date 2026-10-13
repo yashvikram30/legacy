@@ -1,5 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
+/* Tailwind utilities, without its preflight reset: the policy engine UI is
+   styled with utility classes, while the rest of the app uses the
+   hand-written styles below, which a global reset would disturb. Tailwind
+   was installed and wired into PostCSS but never imported, so those
+   components rendered unstyled. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 @font-face {
   font-family: 'Murs Gothic';
   src: url('/mursgothic-widedark.otf') format('opentype');
@@ -67,10 +76,14 @@
 
 
 /* ─── Reset ─────────────────────────────────────────────────────── */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* In the base layer so utility classes can override it; the app's own
+   (unlayered) styles still take precedence over it as before. */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 html {

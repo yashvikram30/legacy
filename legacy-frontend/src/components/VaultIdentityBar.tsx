@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { shortAddress } from "@/lib/constants";
+import { shortAddress, explorerAddressUrl, EXPLORER_NAME } from "@/lib/constants";
 
 interface VaultIdentityBarProps {
   vaultAddress: `0x${string}`;
@@ -141,13 +141,13 @@ export function VaultIdentityBar({
               </button>
               <span className="meta-sep" aria-hidden="true" />
               <a
-                href={`https://sepolia.worldscan.org/address/${vaultAddress}`}
+                href={explorerAddressUrl(vaultAddress)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flow-link"
                 style={{ fontSize: "0.75rem" }}
               >
-                Worldscan ↗
+                {EXPLORER_NAME} ↗
               </a>
             </div>
           </div>

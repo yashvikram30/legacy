@@ -18,7 +18,7 @@ export const LegacyVaultFactoryABI = [
       {
         "name": "verifier",
         "type": "address",
-        "internalType": "contract WorldIDVerifierAdapter"
+        "internalType": "contract ILivenessVerifier"
       },
       {
         "name": "checkInInterval",
@@ -66,6 +66,30 @@ export const LegacyVaultFactoryABI = [
   },
   {
     "type": "function",
+    "name": "getVaultsPage",
+    "inputs": [
+      {
+        "name": "start",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "page",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "implementation",
     "inputs": [],
     "outputs": [
@@ -73,6 +97,19 @@ export const LegacyVaultFactoryABI = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vaultCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -282,19 +319,9 @@ export const LegacyVaultABI = [
     "name": "checkIn",
     "inputs": [
       {
-        "name": "root",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "nullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "proof",
-        "type": "uint256[8]",
-        "internalType": "uint256[8]"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
@@ -422,6 +449,19 @@ export const LegacyVaultABI = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getAssetIds",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -555,7 +595,7 @@ export const LegacyVaultABI = [
       {
         "name": "_verifier",
         "type": "address",
-        "internalType": "contract WorldIDVerifierAdapter"
+        "internalType": "contract ILivenessVerifier"
       },
       {
         "name": "_checkInInterval",
@@ -636,6 +676,32 @@ export const LegacyVaultABI = [
   },
   {
     "type": "function",
+    "name": "livenessChallenge",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "livenessNonce",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "livenessRegistered",
     "inputs": [],
     "outputs": [
@@ -665,19 +731,9 @@ export const LegacyVaultABI = [
     "name": "registerLiveness",
     "inputs": [
       {
-        "name": "root",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "nullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "proof",
-        "type": "uint256[8]",
-        "internalType": "uint256[8]"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
@@ -760,7 +816,7 @@ export const LegacyVaultABI = [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract WorldIDVerifierAdapter"
+        "internalType": "contract ILivenessVerifier"
       }
     ],
     "stateMutability": "view"
@@ -1195,106 +1251,68 @@ export const LegacyVaultABI = [
   }
 ] as const;
 
-export const WorldIDVerifierAdapterABI = [
-  {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "_worldId",
-        "type": "address",
-        "internalType": "contract IWorldID"
-      },
-      {
-        "name": "_groupId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "_externalNullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
+export const PasskeyVerifierAdapterABI = [
   {
     "type": "function",
-    "name": "externalNullifierHash",
-    "inputs": [],
+    "name": "credentialOf",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "qx",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "qy",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "groupId",
-    "inputs": [],
+    "name": "isRegistered",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "hashSignal",
+    "name": "registerCredential",
     "inputs": [
-      {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "signalAddress",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
       {
         "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "registerNullifier",
-    "inputs": [
-      {
-        "name": "vault",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "signalAddress",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "root",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "nullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "challenge",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "proof",
-        "type": "uint256[8]",
-        "internalType": "uint256[8]"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
@@ -1302,68 +1320,51 @@ export const WorldIDVerifierAdapterABI = [
   },
   {
     "type": "function",
-    "name": "vaultNullifier",
+    "name": "verifyLiveness",
     "inputs": [
       {
-        "name": "vault",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "registeredNullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "verifyCheckIn",
-    "inputs": [
-      {
-        "name": "vault",
+        "name": "",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "signalAddress",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "root",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "nullifierHash",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "challenge",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "proof",
-        "type": "uint256[8]",
-        "internalType": "uint256[8]"
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
     "stateMutability": "view"
   },
   {
-    "type": "function",
-    "name": "worldId",
-    "inputs": [],
-    "outputs": [
+    "type": "event",
+    "name": "CredentialRegistered",
+    "inputs": [
       {
-        "name": "",
+        "name": "vault",
         "type": "address",
-        "internalType": "contract IWorldID"
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "qx",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "qy",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
       }
     ],
-    "stateMutability": "view"
+    "anonymous": false
   },
   {
     "type": "error",
@@ -1372,12 +1373,17 @@ export const WorldIDVerifierAdapterABI = [
   },
   {
     "type": "error",
-    "name": "NullifierMismatch",
+    "name": "InvalidAssertion",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "NullifierNotRegistered",
+    "name": "InvalidPublicKey",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotRegistered",
     "inputs": []
   }
 ] as const;
@@ -1385,15 +1391,6 @@ export const WorldIDVerifierAdapterABI = [
 // Errors that can bubble up through LegacyVault.registerLiveness / checkIn:
 // the verifier adapter's own errors plus the World ID router / Semaphore
 // verifier errors. Merge with LegacyVaultABI so viem can decode the revert.
-export const WorldIDRevertErrorsABI = [
-  { "type": "error", "name": "AlreadyRegistered", "inputs": [] },
-  { "type": "error", "name": "NullifierMismatch", "inputs": [] },
-  { "type": "error", "name": "NullifierNotRegistered", "inputs": [] },
-  { "type": "error", "name": "ProofInvalid", "inputs": [] },
-  { "type": "error", "name": "NonExistentRoot", "inputs": [] },
-  { "type": "error", "name": "ExpiredRoot", "inputs": [] }
-] as const;
-
 export const ERC20AdapterABI = [
   {
     "type": "constructor",
@@ -1848,6 +1845,863 @@ export const ENSResolverAdapterABI = [
   {
     "type": "error",
     "name": "NotVault",
+    "inputs": []
+  }
+] as const;
+
+
+export const LegacyPolicyEngineABI = [
+  {
+    "type": "function",
+    "name": "POLICY_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "RULE_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "TRIGGER_SUCCESSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activePolicies",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "policyHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "committedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "ruleCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "exists",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "commitPolicy",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "policyHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "rules",
+        "type": "tuple[]",
+        "internalType": "struct ILegacyPolicyEngine.PolicyRule[]",
+        "components": [
+          {
+            "name": "beneficiary",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "assetId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "percentageBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "releaseDelaySeconds",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fallbackBeneficiary",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "computePolicyHash",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "trigger",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "rules",
+        "type": "tuple[]",
+        "internalType": "struct ILegacyPolicyEngine.PolicyRule[]",
+        "components": [
+          {
+            "name": "beneficiary",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "assetId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "percentageBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "releaseDelaySeconds",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fallbackBeneficiary",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "domainSeparator",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getActivePolicy",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct ILegacyPolicyEngine.PolicyCommitment",
+        "components": [
+          {
+            "name": "version",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "policyHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "committedAt",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "ruleCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "exists",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPolicyRule",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct ILegacyPolicyEngine.PolicyRule",
+        "components": [
+          {
+            "name": "beneficiary",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "assetId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "percentageBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "releaseDelaySeconds",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fallbackBeneficiary",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPolicyRules",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple[]",
+        "internalType": "struct ILegacyPolicyEngine.PolicyRule[]",
+        "components": [
+          {
+            "name": "beneficiary",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "assetId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "percentageBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "releaseDelaySeconds",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fallbackBeneficiary",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isRuleExecutable",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "ruleIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "executable",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "releaseTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "latestVersion",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "policyHistory",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "policyHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "committedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "ruleCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "exists",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "PolicyCommitted",
+    "inputs": [
+      {
+        "name": "vault",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "policyHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "committedBy",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "ruleCount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "BeneficiaryNotHeir",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptyRules",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FallbackBeneficiaryNotHeir",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidBeneficiary",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidPolicyHash",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotVaultOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PolicyHashMismatch",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "VaultNotGreen",
+    "inputs": []
+  }
+] as const;
+
+export const PolicyERC20AdapterABI = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_vault",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_releaseDelay",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_beneficiary",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_fallbackBeneficiary",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "amount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "beneficiary",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "checkOwnership",
+    "inputs": [
+      {
+        "name": "expectedOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fallbackBeneficiary",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getReleaseTimestamp",
+    "inputs": [
+      {
+        "name": "claimant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "releaseDelay",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "token",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IERC20"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transferControl",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "vault",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "TokenTransferred",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "from",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InsufficientAllowance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientBalance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReleaseTimelocked",
+    "inputs": [
+      {
+        "name": "availableAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTimestamp",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedRecipient",
     "inputs": []
   }
 ] as const;

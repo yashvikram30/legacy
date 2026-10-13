@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {WorldIDVerifierAdapter} from "./adapters/WorldIDVerifierAdapter.sol";
+import {ILivenessVerifier} from "./interfaces/ILivenessVerifier.sol";
 import {IVaultExecutor} from "./interfaces/IVaultExecutor.sol";
 
 contract LegacyVault is Initializable, ReentrancyGuardTransient {
@@ -28,13 +28,20 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     }
 
     address public owner;
-    WorldIDVerifierAdapter public verifier;
+    ILivenessVerifier public verifier;
     bool public livenessRegistered;
+
+    // Incremented after every successful liveness registration and check-in.
+    // Feeds `livenessChallenge()`, so each liveness proof that commits to the
+    // challenge (e.g. a passkey assertion) can be used exactly once.
+    uint256 public livenessNonce;
 
     uint256 public lastCheckIn;
     uint256 public checkInInterval;
     uint256 public gracePeriod;
     uint256 public contestableWindow;
+
+    bytes32 private constant LIVENESS_CHALLENGE_DOMAIN = keccak256("Legacy.LivenessChallenge.v1");
 
     uint256 public constant MIN_CHECK_IN_INTERVAL = 5;
     uint256 public constant MIN_CONTESTABLE_WINDOW = 5;
@@ -77,6 +84,13 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     // -------------------------------------------------------------------------
 
     mapping(bytes32 assetId => Allocation) public allocations;
+
+    // Every asset id ever assigned, in order, so the full allocation set can be
+    // read straight from state. Events can't serve this on Monad: public RPCs
+    // cap eth_getLogs at a 100-block range. Read each id's current state from
+    // `allocations`; a removed id reports exists = false.
+    bytes32[] private assetIds;
+    mapping(bytes32 assetId => bool) private isKnownAssetId;
 
     // -------------------------------------------------------------------------
     // Events
@@ -173,7 +187,7 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
 
     function initialize(
         address _owner,
-        WorldIDVerifierAdapter _verifier,
+        ILivenessVerifier _verifier,
         uint256 _checkInInterval,
         uint256 _gracePeriod,
         uint256 _contestableWindow
@@ -239,31 +253,63 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
     }
 
     // -------------------------------------------------------------------------
-    // World ID / Liveness
+    // Liveness
     // -------------------------------------------------------------------------
 
-    function registerLiveness(uint256 root, uint256 nullifierHash, uint256[8] calldata proof) external onlyOwner {
+    /**
+     * @notice The single-use value the next liveness proof must commit to.
+     * @dev Bound to this chain, this vault and the current nonce, so a proof
+     *      cannot be replayed on another vault, another chain, or a second time
+     *      here. Verifiers whose proofs cannot commit to arbitrary data (World ID)
+     *      ignore it; `checkIn` being owner-only covers replay for those.
+     */
+    function livenessChallenge() public view returns (bytes32) {
+        return keccak256(abi.encode(LIVENESS_CHALLENGE_DOMAIN, block.chainid, address(this), livenessNonce));
+    }
+
+    /**
+     * @notice Binds the owner's liveness credential to this vault, once.
+     * @dev Registration demands a fresh proof from the owner, so it also counts
+     *      as a check-in. Without this, an owner who registers after the
+     *      interval has lapsed would need a second proof straight away.
+     * @param proof Verifier-specific credential and proof of possession.
+     */
+    function registerLiveness(bytes calldata proof) external onlyOwner {
         if (livenessRegistered) {
             revert LivenessAlreadyRegistered();
         }
 
-        verifier.registerNullifier(address(this), owner, root, nullifierHash, proof);
+        verifier.registerCredential(owner, livenessChallenge(), proof);
 
         livenessRegistered = true;
+        _recordLiveness();
     }
 
-    function checkIn(uint256 root, uint256 nullifierHash, uint256[8] calldata proof) external onlyOwner {
+    /**
+     * @notice Proves the owner is alive, resetting the liveness timer.
+     * @param proof Verifier-specific liveness proof over `livenessChallenge()`.
+     */
+    function checkIn(bytes calldata proof) external onlyOwner {
         if (!livenessRegistered) {
             revert LivenessNotRegistered();
         }
 
-        verifier.verifyCheckIn(address(this), owner, root, nullifierHash, proof);
+        verifier.verifyLiveness(owner, livenessChallenge(), proof);
 
+        _recordLiveness();
+    }
+
+    /**
+     * @dev Consumes the current challenge and restarts the liveness timer. A
+     *      verified liveness proof is the strongest possible evidence the owner
+     *      is alive: it also defeats any open claim (claims started before the
+     *      new `lastCheckIn` can no longer finalize), clears pending or
+     *      confirmed death attestations and restores the nominal timelock.
+     */
+    function _recordLiveness() private {
+        livenessNonce++;
         lastCheckIn = block.timestamp;
 
-        // A verified liveness proof is the strongest possible evidence the
-        // owner is alive: it clears any pending or confirmed death attestations
-        // and restores the vault to its nominal timelock.
         _resetDeathAttestations();
 
         emit CheckedIn(block.timestamp);
@@ -516,6 +562,11 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
         allocations[assetId] =
             Allocation({heir: heir, executor: executor, assetId: assetId, exists: true, executed: false});
 
+        if (!isKnownAssetId[assetId]) {
+            isKnownAssetId[assetId] = true;
+            assetIds.push(assetId);
+        }
+
         emit AssetAssigned(assetId, heir, address(executor));
     }
 
@@ -530,6 +581,15 @@ contract LegacyVault is Initializable, ReentrancyGuardTransient {
         delete allocations[assetId];
 
         emit AssetRemoved(assetId);
+    }
+
+    /**
+     * @notice Every asset id ever assigned on this vault, in assignment order.
+     * @dev Includes removed and executed ids; read `allocations(id)` for each
+     *      id's current state.
+     */
+    function getAssetIds() external view returns (bytes32[] memory) {
+        return assetIds;
     }
 
     // -------------------------------------------------------------------------

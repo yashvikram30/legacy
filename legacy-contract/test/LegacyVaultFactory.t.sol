@@ -73,6 +73,28 @@ contract LegacyVaultFactoryTest is Test {
         assertEq(vaults[0], vault1);
     }
 
+    function test_AllVaultsArePagedInCreationOrder() public {
+        vm.prank(owner1);
+        address a = factory.createVault(verifier, CHECK_IN_INTERVAL, GRACE_PERIOD, CONTESTABLE_WINDOW);
+        vm.prank(owner2);
+        address b = factory.createVault(verifier, CHECK_IN_INTERVAL, GRACE_PERIOD, CONTESTABLE_WINDOW);
+        vm.prank(owner1);
+        address c = factory.createVault(verifier, CHECK_IN_INTERVAL, GRACE_PERIOD, CONTESTABLE_WINDOW);
+
+        assertEq(factory.vaultCount(), 3);
+
+        address[] memory firstTwo = factory.getVaultsPage(0, 2);
+        assertEq(firstTwo.length, 2);
+        assertEq(firstTwo[0], a);
+        assertEq(firstTwo[1], b);
+
+        // A page running past the end is truncated, one starting past it is empty.
+        address[] memory rest = factory.getVaultsPage(2, 10);
+        assertEq(rest.length, 1);
+        assertEq(rest[0], c);
+        assertEq(factory.getVaultsPage(3, 10).length, 0);
+    }
+
     function test_TwoOwnersReceiveIndependentVaults() public {
         vm.prank(owner1);
         address vault1 = factory.createVault(verifier, CHECK_IN_INTERVAL, GRACE_PERIOD, CONTESTABLE_WINDOW);

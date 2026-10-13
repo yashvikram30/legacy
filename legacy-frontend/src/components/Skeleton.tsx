@@ -296,7 +296,7 @@ export function TransparencyLookupSkeleton({ queriedAddress }: { queriedAddress?
       >
         {[
           "Owner Identity",
-          "World ID Proof Binding",
+          "Passkey Binding",
           "Designated Beneficiaries",
           "Last Biometric Check-in",
         ].map((title, i) => (

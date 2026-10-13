@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { explorerAddressUrl, EXPLORER_NAME } from "@/lib/constants";
 
 interface AddressChipProps {
   address: string;
@@ -90,7 +91,7 @@ export function AddressChip({
         <>
           <span style={{ color: "rgba(255, 255, 255, 0.2)", fontSize: "0.75rem" }}>·</span>
           <a
-            href={`https://sepolia.worldscan.org/address/${address}`}
+            href={explorerAddressUrl(address)}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -101,9 +102,9 @@ export function AddressChip({
               textUnderlineOffset: "3px",
               transition: "color 0.15s ease",
             }}
-            title="View contract on Worldscan"
+            title={`View on ${EXPLORER_NAME}`}
           >
-            Worldscan ↗
+            {EXPLORER_NAME} ↗
           </a>
         </>
       )}

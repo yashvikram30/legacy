@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { AddressChip } from "./AddressChip";
+import { CHAIN_NAME, activeChain } from "@/lib/constants";
 
 interface VaultHeaderProps {
   selectedVault: `0x${string}` | null;
@@ -84,7 +85,7 @@ export function VaultHeader({
               color: isWrongChain ? "var(--status-red)" : "var(--text-secondary)",
             }}
           >
-            {isWrongChain ? "Wrong Network" : "World Chain Sepolia (4801)"}
+            {isWrongChain ? "Wrong Network" : `${CHAIN_NAME} (${activeChain.id})`}
           </span>
         </div>
       </div>

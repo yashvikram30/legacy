@@ -1,8 +1,9 @@
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { createAppKit } from "@reown/appkit/react";
-import { worldchainSepolia } from "@reown/appkit/networks";
+import type { AppKitNetwork } from "@reown/appkit/networks";
 import { OptionsController } from "@reown/appkit-controllers";
 import { http } from "wagmi";
+import { activeChain, ACTIVE_RPC_URL } from "./constants";
 
 // Explicitly disable Base Account and Coinbase telemetry/connectors
 if (typeof window !== "undefined") {
@@ -27,7 +28,9 @@ export const projectId =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
   "89158bc2598a52d05fe83c04fc5f7b50";
 
-export const networks = [worldchainSepolia] as [typeof worldchainSepolia, ...typeof worldchainSepolia[]];
+const activeNetwork = activeChain as AppKitNetwork;
+
+export const networks = [activeNetwork] as [AppKitNetwork, ...AppKitNetwork[]];
 
 const globalForAppKit = globalThis as unknown as {
   wagmiAdapter?: WagmiAdapter;
@@ -41,10 +44,7 @@ export const wagmiAdapter =
     projectId,
     networks,
     transports: {
-      [worldchainSepolia.id]: http(
-        process.env.NEXT_PUBLIC_WORLD_CHAIN_RPC_URL ||
-          "https://worldchain-sepolia.gateway.tenderly.co"
-      ),
+      [activeChain.id]: http(ACTIVE_RPC_URL),
     },
   });
 
@@ -66,7 +66,7 @@ export const appKit =
     adapters: [wagmiAdapter],
     projectId,
     networks,
-    defaultNetwork: worldchainSepolia,
+    defaultNetwork: activeNetwork,
     metadata,
     themeMode: "dark",
     themeVariables: {

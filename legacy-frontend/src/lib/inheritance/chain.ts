@@ -1,13 +1,12 @@
 import { createPublicClient, http } from "viem";
-import { worldChainSepolia, VaultStatus } from "@/lib/constants";
+import { activeChain, VaultStatus, ACTIVE_RPC_URL } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 
 export function getServerPublicClient() {
   return createPublicClient({
-    chain: worldChainSepolia,
+    chain: activeChain,
     transport: http(
-      process.env.NEXT_PUBLIC_WORLD_CHAIN_RPC_URL ||
-        "https://worldchain-sepolia.gateway.tenderly.co"
+      ACTIVE_RPC_URL
     ),
   });
 }

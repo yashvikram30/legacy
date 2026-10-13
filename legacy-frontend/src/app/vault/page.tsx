@@ -1,16 +1,18 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useAccount, useReadContract, useWriteContract, usePublicClient, useChainId, useSwitchChain } from "wagmi";
 import { useWalletModal } from "@/components/WalletModal";
 import {
   CONTRACT_ADDRESSES,
   VaultStatus,
-  worldChainSepolia,
+  activeChain,
+  DEFAULT_VAULT_TIMINGS,
+  CHAIN_NAME,
 } from "@/lib/constants";
 import { BaseError, ContractFunctionRevertedError, getAddress, isAddress, isAddressEqual } from "viem";
-import { LegacyVaultFactoryABI, LegacyVaultABI, WorldIDRevertErrorsABI } from "@/lib/contracts/abis";
+import { LegacyVaultFactoryABI, LegacyVaultABI, PasskeyVerifierAdapterABI } from "@/lib/contracts/abis";
 import { VaultDashboardHub } from "@/components/VaultDashboardHub";
 import { LivenessPanel } from "@/components/LivenessPanel";
 import { SealedMessagePanel } from "@/components/SealedMessagePanel";
@@ -19,6 +21,8 @@ import { CheckInModal } from "@/components/CheckInModal";
 import { HeirList } from "@/components/HeirList";
 import { GuardianList } from "@/components/GuardianList";
 import { AssetList, AssetRecord } from "@/components/AssetList";
+import { useAllocationHealth } from "@/hooks/useAllocationHealth";
+import { allocationErc20Abi, allocationErc721Abi } from "@/lib/allocations";
 import { VaultParameters } from "@/components/VaultParameters";
 import { WatchdogAlertPanel } from "@/components/WatchdogAlertPanel";
 import {
@@ -41,20 +45,27 @@ import {
   type VaultMetaRecord,
 } from "@/lib/vault-meta/client";
 import { useMounted } from "@/hooks/useMounted";
+import { PolicyCard } from "@/components/policy/PolicyCard";
+import { PolicyEngineModal } from "@/components/policy/PolicyEngineModal";
+import { usePolicyEngine } from "@/hooks/usePolicyEngine";
+import { type VaultPolicyContext } from "@/lib/policy/types";
 
-// LegacyVault ABI plus the World ID errors that bubble up through
+// LegacyVault ABI plus the passkey verifier's errors that bubble up through
 // registerLiveness / checkIn, so simulated reverts decode to a named error.
-const LivenessCallABI = [...LegacyVaultABI, ...WorldIDRevertErrorsABI] as const;
+const LivenessCallABI = [
+  ...LegacyVaultABI,
+  ...PasskeyVerifierAdapterABI.filter((item) => item.type === "error"),
+] as const;
 
 const LIVENESS_REVERT_MESSAGES: Record<string, string> = {
-  ProofInvalid:
-    "ProofInvalid: The World ID proof was rejected by this vault's verifier. Vaults bound to the production World ID router reject staging/simulator proofs. Deploy a new vault on the testnet verifier.",
-  NonExistentRoot: "NonExistentRoot: The proof's Merkle root is unknown to this vault's World ID verifier.",
-  ExpiredRoot: "ExpiredRoot: The proof's Merkle root has expired. Generate a fresh World ID proof.",
-  LivenessAlreadyRegistered: "LivenessAlreadyRegistered: This vault already has an enrolled identity.",
-  AlreadyRegistered: "AlreadyRegistered: The verifier already holds a nullifier for this vault.",
-  LivenessNotRegistered: "LivenessNotRegistered: Register liveness before checking in.",
-  NotOwner: "NotOwner: Only the vault owner can submit liveness proofs.",
+  InvalidAssertion:
+    "Your passkey's signature wasn't accepted. If your device offered more than one passkey, pick the one you created for this vault and try again.",
+  InvalidPublicKey: "That passkey's public key isn't a valid P-256 key. Create a new passkey and try again.",
+  AlreadyRegistered: "This vault already has a passkey linked.",
+  LivenessAlreadyRegistered: "This vault already has a passkey linked.",
+  NotRegistered: "Set up a passkey for this vault before checking in.",
+  LivenessNotRegistered: "Set up a passkey for this vault before checking in.",
+  NotOwner: "Only the vault owner can check in. Connect the wallet that created this vault.",
 };
 
 // Simulates a liveness call so a bad proof fails before broadcast (the real
@@ -77,7 +88,7 @@ async function assertLivenessCallSucceeds(
   }
 }
 
-const VAULT_TABS = ["heirs", "guardians", "assets", "parameters", "activity", "watchdog", "message"] as const;
+const VAULT_TABS = ["heirs", "guardians", "assets", "policy", "parameters", "activity", "watchdog", "message"] as const;
 type VaultTab = (typeof VAULT_TABS)[number];
 
 export default function VaultDashboardPage() {
@@ -85,7 +96,7 @@ export default function VaultDashboardPage() {
   const { address, isConnected, isConnecting, isReconnecting } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const isWrongChain = isConnected && chainId !== worldChainSepolia.id;
+  const isWrongChain = isConnected && chainId !== activeChain.id;
   const { openConnectModal } = useWalletModal();
   const publicClient = usePublicClient();
 
@@ -97,7 +108,9 @@ export default function VaultDashboardPage() {
   const [isSettling, setIsSettling] = useState(false);
   const [orchestratedMessage, setOrchestratedMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<VaultTab>("heirs");
-  const [assetList, setAssetList] = useState<AssetRecord[]>([]);
+  // Labels typed in for custom executors this session; on-chain allocations
+  // carry no label, and token/NFT labels are derived from the adapter instead.
+  const [customAssetLabels, setCustomAssetLabels] = useState<Record<string, string>>({});
 
   // Deployment state
   const [isCreatingVault, setIsCreatingVault] = useState(false);
@@ -259,6 +272,34 @@ export default function VaultDashboardPage() {
     query: { enabled: Boolean(selectedVault) },
   });
 
+  // Allocations are loaded from the chain, so they survive a page reload, and
+  // each one is checked live for whether it would actually pay out.
+  const {
+    allocations,
+    health: allocationHealth,
+    readiness: allocationReadiness,
+    isLoading: isLoadingAllocations,
+    refresh: refreshAllocations,
+    refreshHealth: refreshAllocationHealth,
+  } = useAllocationHealth(selectedVault ?? undefined, (vaultOwner as `0x${string}` | undefined) ?? address);
+
+  const assetList: AssetRecord[] = useMemo(
+    () =>
+      allocations.map((allocation) => ({
+        assetId: allocation.assetId,
+        label:
+          allocation.asset.kind === "OTHER"
+            ? customAssetLabels[allocation.assetId] ?? allocation.label
+            : allocation.label,
+        assetType: allocation.asset.kind === "OTHER" ? "CUSTOM" : allocation.asset.kind,
+        heir: allocation.heir,
+        executor: allocation.executor,
+        executed: allocation.executed,
+        allocation,
+      })),
+    [allocations, customAssetLabels]
+  );
+
   const { data: vaultVerifier, refetch: refetchVerifier } = useReadContract({
     address: selectedVault ?? undefined,
     abi: LegacyVaultABI,
@@ -267,6 +308,17 @@ export default function VaultDashboardPage() {
   });
 
   const { writeContractAsync } = useWriteContract();
+
+  // ── Policy Engine state & hook ────────────────────────────────────
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
+  const {
+    policyVersion,
+    policyHash,
+    rules: policyRules,
+    activePolicy,
+    refetch: refetchPolicy,
+    savePolicyLocally,
+  } = usePolicyEngine(selectedVault ?? undefined);
 
   // ── Derived state ─────────────────────────────────────────────────
   const status = rawStatus !== undefined ? (Number(rawStatus) as VaultStatus) : VaultStatus.Green;
@@ -278,13 +330,39 @@ export default function VaultDashboardPage() {
     optimisticLiveness && selectedVault && optimisticLiveness.vault.toLowerCase() === selectedVault.toLowerCase()
       ? optimisticLiveness.value
       : Boolean(livenessRegisteredRaw);
-  const heirs = (rawHeirs as readonly `0x${string}`[]) || [];
+  const heirs = useMemo(() => (rawHeirs as readonly `0x${string}`[]) || [], [rawHeirs]);
   const heirNames = heirNameMap(vaultMeta);
   const vaultName = vaultMeta?.vaultName;
   const ownerName = vaultMeta?.ownerName;
   const guardians = (rawGuardians as readonly `0x${string}`[]) || [];
   const deathAttestationCount = deathAttestationCountRaw !== undefined ? Number(deathAttestationCountRaw) : 0;
   const deathConfirmed = Boolean(deathConfirmedRaw);
+
+  const policyContext: VaultPolicyContext = useMemo(
+    () => ({
+      vaultAddress: (selectedVault || "0x0000000000000000000000000000000000000000") as `0x${string}`,
+      ownerAddress: ((vaultOwner as `0x${string}`) || address || "0x0000000000000000000000000000000000000000") as `0x${string}`,
+      isOwnerConnected: Boolean(address && vaultOwner && isAddressEqual(address, vaultOwner as `0x${string}`)),
+      vaultStatus: status,
+      heirs: heirs.map((h) => ({
+        address: h,
+        name: heirNames[h.toLowerCase() as `0x${string}`],
+      })),
+      assets: assetList.map((a) => {
+        const asset = a.allocation?.asset;
+        return {
+          assetId: a.assetId,
+          label: a.label,
+          kind: (asset?.kind || "OTHER") as "ERC20" | "ERC721" | "ENS" | "OTHER",
+          token: asset && asset.kind === "ERC20" ? asset.token : undefined,
+          amount: asset && asset.kind === "ERC20" ? asset.amount : undefined,
+          symbol: asset && asset.kind === "ERC20" ? asset.symbol : undefined,
+          decimals: asset && asset.kind === "ERC20" ? asset.decimals : undefined,
+        };
+      }),
+    }),
+    [selectedVault, vaultOwner, address, status, heirs, heirNames, assetList]
+  );
 
   // Load off-chain metadata (vault name + beneficiary names) whenever the
   // selected vault changes. Names are best-effort; a failure just falls back
@@ -348,122 +426,61 @@ export default function VaultDashboardPage() {
     setTimeout(() => setOrchestratedMessage(null), 9000);
   };
 
-  const handlePerformCheckInTx = async (
-    root: bigint,
-    nullifierHash: bigint,
-    proof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
-  ) => {
+  const handlePerformCheckInTx = async (proof: `0x${string}`) => {
     if (!publicClient || !selectedVault) throw new Error("Client or vault unavailable");
-    try {
-      console.log("👉 [Vault] Calling checkIn on contract:", {
-        vault: selectedVault,
-        root: root.toString(),
-        nullifierHash: nullifierHash.toString(),
-        proofLength: proof.length,
-      });
-      await assertLivenessCallSucceeds(
-        () =>
-          publicClient.simulateContract({
-            account: address,
-            address: selectedVault,
-            abi: LivenessCallABI,
-            functionName: "checkIn",
-            args: [root, nullifierHash, proof],
-          }),
-        "checkIn"
-      );
-      const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
-        address: selectedVault,
-        abi: LegacyVaultABI,
-        functionName: "checkIn",
-        args: [root, nullifierHash, proof],
-        gas: 450000n,
-      });
-      console.log("⏳ [Vault] checkIn tx broadcast:", hash);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status === "reverted") {
-        console.error("❌ [Vault] checkIn transaction reverted on-chain:", receipt);
-        throw new Error(`Check-in transaction reverted on-chain (tx ${hash}).`);
-      }
-      console.log("✅ [Vault] checkIn confirmed on-chain");
-    } catch (err: unknown) {
-      console.error("❌ [Vault] checkIn failed:", err);
-      throw err;
+    // Simulate first so a rejected passkey fails before broadcast, with a named error.
+    await assertLivenessCallSucceeds(
+      () =>
+        publicClient.simulateContract({
+          account: address,
+          address: selectedVault,
+          abi: LivenessCallABI,
+          functionName: "checkIn",
+          args: [proof],
+        }),
+      "checkIn"
+    );
+    const hash = await writeContractAsync({
+      chainId: activeChain.id,
+      address: selectedVault,
+      abi: LegacyVaultABI,
+      functionName: "checkIn",
+      args: [proof],
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status === "reverted") {
+      throw new Error(`Check-in transaction reverted on-chain (tx ${hash}).`);
     }
+    refetchAll();
   };
 
-  const handleRegisterLivenessTx = async (
-    root: bigint,
-    nullifierHash: bigint,
-    proof: readonly [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint]
-  ) => {
+  const handleRegisterLivenessTx = async (proof: `0x${string}`) => {
     if (!publicClient || !selectedVault) throw new Error("Client or vault unavailable");
-    try {
-      console.log("👉 [Vault] Calling registerLiveness on contract:", {
-        vault: selectedVault,
-        root: root.toString(),
-        nullifierHash: nullifierHash.toString(),
-        proofLength: proof.length,
-      });
-      await assertLivenessCallSucceeds(
-        () =>
-          publicClient.simulateContract({
-            account: address,
-            address: selectedVault,
-            abi: LivenessCallABI,
-            functionName: "registerLiveness",
-            args: [root, nullifierHash, proof],
-          }),
-        "registerLiveness"
-      );
-      const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
-        address: selectedVault,
-        abi: LegacyVaultABI,
-        functionName: "registerLiveness",
-        args: [root, nullifierHash, proof],
-        gas: 450000n,
-      });
-      console.log("⏳ [Vault] registerLiveness tx broadcast:", hash);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status === "reverted") {
-        console.error("❌ [Vault] registerLiveness transaction reverted on-chain:", receipt);
-        throw new Error(`Liveness registration reverted on-chain (tx ${hash}).`);
-      }
-      if (selectedVault) {
-        setOptimisticLiveness({ vault: selectedVault, value: true });
-      }
-
-      // If vault is not Green (e.g. interval expired before initial enrollment), immediately check in to restore Green
-      try {
-        const currentStatus = await publicClient.readContract({
+    await assertLivenessCallSucceeds(
+      () =>
+        publicClient.simulateContract({
+          account: address,
           address: selectedVault,
-          abi: LegacyVaultABI,
-          functionName: "getStatus",
-        });
-        if (Number(currentStatus) !== 0) {
-          console.log("👉 [Vault] Vault is currently not Green, automatically checking in to restore Green...");
-          const checkInHash = await writeContractAsync({
-            chainId: worldChainSepolia.id,
-            address: selectedVault,
-            abi: LegacyVaultABI,
-            functionName: "checkIn",
-            args: [root, nullifierHash, proof],
-            gas: 450000n,
-          });
-          await publicClient.waitForTransactionReceipt({ hash: checkInHash });
-          console.log("✅ [Vault] Auto check-in confirmed, vault restored to Green");
-        }
-      } catch (autoErr) {
-        console.warn("⚠️ [Vault] Auto check-in follow-up warning:", autoErr);
-      }
-
-      refetchAll();
-    } catch (err: unknown) {
-      console.error("❌ [Vault] registerLiveness failed:", err);
-      throw err;
+          abi: LivenessCallABI,
+          functionName: "registerLiveness",
+          args: [proof],
+        }),
+      "registerLiveness"
+    );
+    const hash = await writeContractAsync({
+      chainId: activeChain.id,
+      address: selectedVault,
+      abi: LegacyVaultABI,
+      functionName: "registerLiveness",
+      args: [proof],
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status === "reverted") {
+      throw new Error(`Passkey setup reverted on-chain (tx ${hash}).`);
     }
+    // Registration also counts as a check-in on-chain, so the vault is Green now.
+    setOptimisticLiveness({ vault: selectedVault, value: true });
+    refetchAll();
   };
 
   const handleAddHeir = async (heir: `0x${string}`, name: string) => {
@@ -480,12 +497,12 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot add heir: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Heir modifications are locked while vault is not in Green status. Please perform a World ID check-in above to restore Green status first.`
+          } status. Heir modifications are locked while vault is not in Green status. Check in above to make the vault active again first.`
         );
       }
 
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "addHeir",
@@ -510,7 +527,7 @@ export default function VaultDashboardPage() {
         msg.toLowerCase().includes("gas limit") ||
         msg.includes("0x12c1")
       ) {
-        throw new Error("Cannot add heir: Vault is not Green. Heir modifications are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+        throw new Error("Cannot add heir: Vault is not Green. Heir modifications are locked while vault is Amber or Red. Check in above to make the vault active again first.");
       }
       throw err;
     }
@@ -529,12 +546,12 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot remove heir: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Heir modifications are locked while vault is not in Green status. Please perform a World ID check-in above to restore Green status first.`
+          } status. Heir modifications are locked while vault is not in Green status. Check in above to make the vault active again first.`
         );
       }
 
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "removeHeir",
@@ -557,7 +574,7 @@ export default function VaultDashboardPage() {
         msg.toLowerCase().includes("gas limit") ||
         msg.includes("0x12c1")
       ) {
-        throw new Error("Cannot remove heir: Vault is not Green. Heir modifications are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+        throw new Error("Cannot remove heir: Vault is not Green. Heir modifications are locked while vault is Amber or Red. Check in above to make the vault active again first.");
       }
       throw err;
     }
@@ -575,11 +592,11 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot add guardian: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Guardian changes are locked while the vault is not Green. Perform a World ID check-in to restore Green status first.`
+          } status. Guardian changes are locked while the vault is not Green. Check in to make the vault active again first.`
         );
       }
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "addGuardian",
@@ -616,7 +633,7 @@ export default function VaultDashboardPage() {
         );
       }
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "removeGuardian",
@@ -654,12 +671,12 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot assign asset: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Asset assignments are locked while vault is not in Green status. Please perform a World ID check-in above to restore Green status first.`
+          } status. Asset assignments are locked while vault is not in Green status. Check in above to make the vault active again first.`
         );
       }
 
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "assignAsset",
@@ -669,7 +686,8 @@ export default function VaultDashboardPage() {
       console.log("⏳ [Vault] assignAsset tx broadcast:", hash);
       await publicClient.waitForTransactionReceipt({ hash });
       console.log("✅ [Vault] assignAsset confirmed on-chain");
-      setAssetList((prev) => [...prev, { assetId, label, assetType: "ERC20", heir, executor, executed: false }]);
+      setCustomAssetLabels((prev) => ({ ...prev, [assetId]: label }));
+      await refreshAllocations();
     } catch (err: unknown) {
       console.error("❌ [Vault] assignAsset error details:", err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -679,10 +697,41 @@ export default function VaultDashboardPage() {
         msg.toLowerCase().includes("gas limit") ||
         msg.includes("0x12c1")
       ) {
-        throw new Error("Cannot assign asset: Vault is not Green. Asset assignments are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+        throw new Error("Cannot assign asset: Vault is not Green. Asset assignments are locked while vault is Amber or Red. Check in above to make the vault active again first.");
       }
       throw err;
     }
+  };
+
+  const handleRestoreApproval = async (assetId: `0x${string}`) => {
+    const allocation = allocations.find((a) => a.assetId === assetId);
+    if (!publicClient || !allocation) throw new Error("Allocation unavailable");
+    const { asset, executor } = allocation;
+
+    // Approvals live on the token, not the vault, so this works in any vault status.
+    let hash: `0x${string}`;
+    if (asset.kind === "ERC20") {
+      hash = await writeContractAsync({
+        chainId: activeChain.id,
+        address: asset.token,
+        abi: allocationErc20Abi,
+        functionName: "approve",
+        args: [executor, asset.amount],
+      });
+    } else if (asset.kind === "ERC721") {
+      hash = await writeContractAsync({
+        chainId: activeChain.id,
+        address: asset.token,
+        abi: allocationErc721Abi,
+        functionName: "approve",
+        args: [executor, asset.tokenId],
+      });
+    } else {
+      throw new Error("This asset type has to be re-approved from its own app.");
+    }
+
+    await publicClient.waitForTransactionReceipt({ hash });
+    await refreshAllocationHealth();
   };
 
   const handleRemoveAsset = async (assetId: `0x${string}`) => {
@@ -698,12 +747,12 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot remove asset: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Asset modifications are locked while vault is not in Green status. Please perform a World ID check-in above to restore Green status first.`
+          } status. Asset modifications are locked while vault is not in Green status. Check in above to make the vault active again first.`
         );
       }
 
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "removeAsset",
@@ -713,7 +762,7 @@ export default function VaultDashboardPage() {
       console.log("⏳ [Vault] removeAsset tx broadcast:", hash);
       await publicClient.waitForTransactionReceipt({ hash });
       console.log("✅ [Vault] removeAsset confirmed on-chain");
-      setAssetList((prev) => prev.filter((a) => a.assetId !== assetId));
+      await refreshAllocations();
     } catch (err: unknown) {
       console.error("❌ [Vault] removeAsset error details:", err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -723,7 +772,7 @@ export default function VaultDashboardPage() {
         msg.toLowerCase().includes("gas limit") ||
         msg.includes("0x12c1")
       ) {
-        throw new Error("Cannot remove asset: Vault is not Green. Asset modifications are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+        throw new Error("Cannot remove asset: Vault is not Green. Asset modifications are locked while vault is Amber or Red. Check in above to make the vault active again first.");
       }
       throw err;
     }
@@ -746,12 +795,12 @@ export default function VaultDashboardPage() {
         throw new Error(
           `Cannot update parameters: Vault is currently in ${
             Number(currentStatus) === 1 ? "Amber" : "Red"
-          } status. Parameters are locked while vault is not in Green status. Please perform a World ID check-in above to restore Green status first.`
+          } status. Parameters are locked while vault is not in Green status. Check in above to make the vault active again first.`
         );
       }
 
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: selectedVault,
         abi: LegacyVaultABI,
         functionName: "updateParameters",
@@ -773,7 +822,7 @@ export default function VaultDashboardPage() {
         msg.toLowerCase().includes("gas limit") ||
         msg.includes("0x12c1")
       ) {
-        throw new Error("Cannot update parameters: Vault is not Green. Parameters are locked while vault is Amber or Red. Perform a World ID check-in above to restore Green status first.");
+        throw new Error("Cannot update parameters: Vault is not Green. Parameters are locked while vault is Amber or Red. Check in above to make the vault active again first.");
       }
       throw err;
     }
@@ -793,26 +842,15 @@ export default function VaultDashboardPage() {
       setDeployStage("requesting_signature");
 
       if (isWrongChain && switchChain) {
-        await switchChain({ chainId: worldChainSepolia.id });
+        await switchChain({ chainId: activeChain.id });
       }
-      console.log("👉 [Vault] Calling createVault on factory:", {
-        factory: CONTRACT_ADDRESSES.factory,
-        verifier: CONTRACT_ADDRESSES.verifier,
-        checkInInterval: 45n,
-        gracePeriod: 15n,
-        contestableWindow: 45n,
-      });
+      const { checkInInterval, gracePeriod, contestableWindow } = DEFAULT_VAULT_TIMINGS;
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: CONTRACT_ADDRESSES.factory,
         abi: LegacyVaultFactoryABI,
         functionName: "createVault",
-        args: [
-          CONTRACT_ADDRESSES.verifier,
-          45n, // 45s check-in interval
-          15n, // 15s grace period
-          45n, // 45s contestable window
-        ],
+        args: [CONTRACT_ADDRESSES.verifier, checkInInterval, gracePeriod, contestableWindow],
       });
       setDeployTxHash(hash);
       setDeployStage("confirming");
@@ -877,7 +915,7 @@ export default function VaultDashboardPage() {
   // owner has named the vault and confirmed.
   const openVaultCreation = () => {
     if (isWrongChain) {
-      switchChain?.({ chainId: worldChainSepolia.id });
+      switchChain?.({ chainId: activeChain.id });
       return;
     }
     setDeployErrorMessage(null);
@@ -929,14 +967,14 @@ export default function VaultDashboardPage() {
                 SUCCESSION VAULT INSTRUMENT
               </h1>
               <p style={{ color: "var(--text-secondary)", fontSize: "0.9375rem", lineHeight: 1.6, maxWidth: 640 }}>
-                Connect your wallet to configure your non-custodial succession vault, conduct World ID Orb liveness check-ins, designate beneficiaries, and adjust timelock parameters.
+                Connect your wallet to configure your non-custodial succession vault, check in with a passkey, designate beneficiaries, and adjust timelock parameters.
               </p>
             </div>
 
             <div style={{ padding: "36px 32px", display: "flex", flexDirection: "column", gap: "24px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
                 {[
-                  { tag: "01", label: "Autonomous Heartbeat", desc: "World ID Orb-verified zero-knowledge liveness check-ins." },
+                  { tag: "01", label: "Autonomous Heartbeat", desc: "Check in with your fingerprint or face. A passkey, verified on-chain. No seed phrase." },
                   { tag: "02", label: "Self-Sovereign Vault", desc: "Independent smart contract vault owned exclusively by you." },
                   { tag: "03", label: "Beneficiary Control", desc: "Granular heir designation & asset allocation percentages." },
                   { tag: "04", label: "Challenge Window", desc: "48-hour dispute-resistant contestable challenge window." },
@@ -951,7 +989,7 @@ export default function VaultDashboardPage() {
 
               <div style={{ paddingTop: "12px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
                 <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-                  Connect an Ethereum / World Chain compatible wallet to access your vault.
+                  Connect an EVM wallet on {CHAIN_NAME} to access your vault.
                 </div>
                 <button
                   type="button"
@@ -998,12 +1036,12 @@ export default function VaultDashboardPage() {
                 [ WRONG NETWORK ]
               </span>
               <span style={{ color: "#EDEAE3", fontSize: "0.875rem" }}>
-                Your wallet is currently connected to Chain ID {chainId}. Please switch to World Chain Sepolia (Chain ID {worldChainSepolia.id}) to deploy and manage vaults.
+                Your wallet is currently connected to Chain ID {chainId}. Please switch to {CHAIN_NAME} (Chain ID {activeChain.id}) to deploy and manage vaults.
               </span>
             </div>
             <button
               type="button"
-              onClick={() => switchChain?.({ chainId: worldChainSepolia.id })}
+              onClick={() => switchChain?.({ chainId: activeChain.id })}
               className="btn-brass"
               style={{ padding: "8px 18px", fontSize: "0.75rem", whiteSpace: "nowrap" }}
             >
@@ -1022,7 +1060,7 @@ export default function VaultDashboardPage() {
               onCreateVault={openVaultCreation}
               isCreatingVault={isCreatingVault}
               isWrongChain={Boolean(isWrongChain)}
-              onSwitchChain={() => switchChain?.({ chainId: worldChainSepolia.id })}
+              onSwitchChain={() => switchChain?.({ chainId: activeChain.id })}
             />
           </div>
         ) : (
@@ -1070,8 +1108,8 @@ export default function VaultDashboardPage() {
                 {vaultVerifier && (vaultVerifier as string).toLowerCase() !== CONTRACT_ADDRESSES.verifier.toLowerCase() && (
                   <div className="console-alert console-alert--warning">
                     <div className="console-alert-body">
-                      <strong>This vault can&apos;t check in on testnet</strong>
-                      <p>It uses the production World ID verifier. Create a new vault to test.</p>
+                      <strong>This vault can&apos;t check in from this app</strong>
+                      <p>It was created with a different liveness verifier than this deployment uses. Create a new vault to use passkey check-ins.</p>
                     </div>
                     <button
                       type="button"
@@ -1109,6 +1147,7 @@ export default function VaultDashboardPage() {
                     { id: "heirs", label: `Heirs (${heirs.length})` },
                     { id: "guardians", label: `Guardians (${guardians.length})` },
                     { id: "assets", label: `Assets (${assetList.length})` },
+                    { id: "policy", label: policyVersion > 0 ? `Policy (#${policyVersion})` : `Policy` },
                     { id: "parameters", label: `Timing` },
                     { id: "activity", label: `Activity` },
                     { id: "watchdog", label: `Alerts` },
@@ -1172,7 +1211,74 @@ export default function VaultDashboardPage() {
                       onAssignAsset={handleAssignAsset}
                       onRemoveAsset={handleRemoveAsset}
                       vaultAddress={selectedVault}
+                      health={allocationHealth}
+                      readiness={allocationReadiness}
+                      isCheckingHealth={isLoadingAllocations}
+                      onRestoreApproval={handleRestoreApproval}
                     />
+                  )}
+
+                  {activeTab === "policy" && (
+                    <div className="panel-stack" style={{ gap: "16px" }}>
+                      <PolicyCard
+                        activePolicy={activePolicy}
+                        policyVersion={policyVersion}
+                        policyHash={policyHash}
+                        onOpenBuilder={() => setIsPolicyModalOpen(true)}
+                        isOwner={Boolean(address && vaultOwner && isAddressEqual(address, vaultOwner as `0x${string}`))}
+                        vaultStatus={status}
+                      />
+                      {policyRules.length > 0 && (
+                        <div className="console-card" style={{ padding: "20px" }}>
+                          <h4 style={{ margin: "0 0 12px", fontSize: "0.8125rem", color: "var(--accent-brass)", textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: "var(--font-mono, monospace)" }}>
+                            Active Policy Execution Rules
+                          </h4>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            {policyRules.map((rule, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  padding: "12px 16px",
+                                  backgroundColor: "#10151A",
+                                  border: "1px solid var(--border-hairline)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  flexWrap: "wrap",
+                                  gap: "8px",
+                                }}
+                              >
+                                <div>
+                                  <strong style={{ color: "#EDEAE3", fontSize: "0.875rem", display: "block" }}>
+                                    {rule.beneficiaryName ? `${rule.beneficiaryName} (${rule.beneficiary.slice(0, 6)}…)` : rule.beneficiary}
+                                  </strong>
+                                  <span style={{ color: "#9A9E98", fontSize: "0.75rem" }}>
+                                    {rule.assetLabel || "Asset"}
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                  <span className="font-data" style={{ color: "#EDEAE3", fontSize: "0.875rem" }}>
+                                    {rule.percentageBps > 0 ? `${(rule.percentageBps / 100).toFixed(0)}%` : "Fixed"}
+                                  </span>
+                                  <span
+                                    style={{
+                                      padding: "2px 8px",
+                                      fontSize: "0.6875rem",
+                                      fontFamily: "var(--font-mono, monospace)",
+                                      backgroundColor: rule.releaseDelaySeconds === 0n ? "rgba(76, 175, 109, 0.15)" : "rgba(217, 154, 61, 0.15)",
+                                      color: rule.releaseDelaySeconds === 0n ? "var(--status-green)" : "var(--status-amber)",
+                                      border: `1px solid ${rule.releaseDelaySeconds === 0n ? "rgba(76, 175, 109, 0.3)" : "rgba(217, 154, 61, 0.3)"}`,
+                                    }}
+                                  >
+                                    {rule.releaseDelaySeconds === 0n ? "Immediate (T+0)" : `T+${Number(rule.releaseDelaySeconds) / 86400}d`}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {activeTab === "parameters" && (
@@ -1217,15 +1323,30 @@ export default function VaultDashboardPage() {
         )}
       </div>
 
-      {/* World ID Check-In / Registration Modal */}
+      {/* Legacy Policy Engine Modal */}
+      {selectedVault && (
+        <PolicyEngineModal
+          isOpen={isPolicyModalOpen}
+          onClose={() => setIsPolicyModalOpen(false)}
+          context={policyContext}
+          healthMap={allocationHealth}
+          currentPolicyVersion={policyVersion}
+          onPolicyCommitted={(newVer, hash) => {
+            refetchPolicy();
+            if (activePolicy) {
+              savePolicyLocally({ ...activePolicy, version: newVer, policyHash: hash });
+            }
+          }}
+        />
+      )}
+
+      {/* Passkey check-in / one-time setup */}
       {selectedVault && (
         <CheckInModal
           isOpen={isCheckInModalOpen}
           onClose={() => setIsCheckInModalOpen(false)}
           vaultAddress={selectedVault}
-          ownerAddress={(vaultOwner as `0x${string}`) || address || "0x0"}
           livenessRegistered={livenessRegistered}
-          verifierAddress={(vaultVerifier as `0x${string}`) || undefined}
           onPerformCheckInTx={handlePerformCheckInTx}
           onRegisterLivenessTx={handleRegisterLivenessTx}
           onCheckInSuccess={handleCheckInSuccess}

@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getAbiItem } from "viem";
+import type { PublicClient } from "viem";
 import { useAccount, usePublicClient, useReadContracts } from "wagmi";
-import { VaultStatus, VAULT_STATUS_COPY, shortAddress } from "@/lib/constants";
-import { LegacyVaultABI } from "@/lib/contracts/abis";
+import { CONTRACT_ADDRESSES, VaultStatus, VAULT_STATUS_COPY, shortAddress } from "@/lib/constants";
+import { LegacyVaultABI, LegacyVaultFactoryABI } from "@/lib/contracts/abis";
 import { fetchVaultMeta, fetchVaultMetasByOwner } from "@/lib/vault-meta/client";
 
 interface VaultDashboardHubProps {
@@ -27,8 +27,69 @@ interface HeirVaultEntry {
   ownerName?: string;
 }
 
-const heirAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "HeirAdded" });
-const guardianAddedEvent = getAbiItem({ abi: LegacyVaultABI, name: "GuardianAdded" });
+type Address = `0x${string}`;
+
+const VAULT_PAGE_SIZE = 200n;
+
+/**
+ * Finds the vaults that currently list `account` as an heir or guardian, read
+ * entirely from state: every vault the factory created, checked in one batch.
+ * (Event logs can't be used: public Monad RPCs cap eth_getLogs at a 100-block
+ * range.)
+ */
+async function findMemberships(client: PublicClient, account: Address) {
+  const total = (await client.readContract({
+    address: CONTRACT_ADDRESSES.factory,
+    abi: LegacyVaultFactoryABI,
+    functionName: "vaultCount",
+  })) as bigint;
+
+  const vaults: Address[] = [];
+  for (let start = 0n; start < total; start += VAULT_PAGE_SIZE) {
+    const page = (await client.readContract({
+      address: CONTRACT_ADDRESSES.factory,
+      abi: LegacyVaultFactoryABI,
+      functionName: "getVaultsPage",
+      args: [start, VAULT_PAGE_SIZE],
+    })) as readonly Address[];
+    vaults.push(...page);
+  }
+  if (vaults.length === 0) return { heirVaults: [], guardianVaults: [] };
+
+  const flags = await client.multicall({
+    allowFailure: true,
+    contracts: vaults.flatMap((vault) => [
+      { address: vault, abi: LegacyVaultABI, functionName: "isHeir", args: [account] } as const,
+      { address: vault, abi: LegacyVaultABI, functionName: "isGuardian", args: [account] } as const,
+    ]),
+  });
+  const listed = (offset: number) =>
+    vaults.filter((_, i) => {
+      const flag = flags[i * 2 + offset];
+      return flag?.status === "success" && flag.result === true;
+    });
+
+  const describe = async (vault: Address): Promise<HeirVaultEntry> => {
+    const [statusNow, ownerNow, meta] = await Promise.all([
+      client.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
+      client.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
+      fetchVaultMeta(vault),
+    ]);
+    return {
+      vault,
+      status: Number(statusNow) as VaultStatus,
+      owner: ownerNow as Address,
+      vaultName: meta?.vaultName,
+      ownerName: meta?.ownerName,
+    };
+  };
+
+  const [heirVaults, guardianVaults] = await Promise.all([
+    Promise.all(listed(0).map(describe)),
+    Promise.all(listed(1).map(describe)),
+  ]);
+  return { heirVaults, guardianVaults };
+}
 
 function StatusDot({ status }: { status: VaultStatus | null }) {
   const copy = status !== null ? VAULT_STATUS_COPY[status] : null;
@@ -191,106 +252,45 @@ export function VaultDashboardHub({
     };
   });
 
-  // ── Heir-side discovery: scan HeirAdded logs for this address across
-  // every vault, then confirm current membership (handles removals) ──
-  const [heirVaults, setHeirVaults] = useState<HeirVaultEntry[]>([]);
-  const [isLoadingHeirVaults, setIsLoadingHeirVaults] = useState(false);
-  const [heirScanError, setHeirScanError] = useState<string | null>(null);
-
-  const scanHeirVaults = useCallback(async () => {
-    if (!publicClient || !address || !heirAddedEvent) return;
-    try {
-      setIsLoadingHeirVaults(true);
-      setHeirScanError(null);
-      const logs = await publicClient.getLogs({
-        event: heirAddedEvent,
-        args: { heir: address },
-        fromBlock: 0n,
-        toBlock: "latest",
-      });
-      const candidates = Array.from(new Set(logs.map((l) => l.address)));
-
-      const results = await Promise.all(
-        candidates.map(async (vault): Promise<HeirVaultEntry | null> => {
-          const [isHeirNow, statusNow, ownerNow] = await Promise.all([
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isHeir", args: [address] }),
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
-          ]);
-          if (!isHeirNow) return null;
-          const meta = await fetchVaultMeta(vault);
-          return {
-            vault,
-            status: Number(statusNow) as VaultStatus,
-            owner: ownerNow as `0x${string}`,
-            vaultName: meta?.vaultName,
-            ownerName: meta?.ownerName,
-          };
-        })
-      );
-
-      setHeirVaults(results.filter((r): r is HeirVaultEntry => r !== null));
-    } catch (err) {
-      console.error("❌ [Dashboard] Failed to scan for beneficiary vaults:", err);
-      setHeirScanError("Could not scan for beneficiary vaults automatically. Your RPC endpoint may restrict this type of query — use manual lookup below instead.");
-    } finally {
-      setIsLoadingHeirVaults(false);
-    }
-  }, [publicClient, address]);
+  // ── Vaults that list this address as an heir or guardian ──
+  const [membership, setMembership] = useState<{
+    key: string;
+    heirVaults: HeirVaultEntry[];
+    guardianVaults: HeirVaultEntry[];
+    error: string | null;
+  } | null>(null);
+  const membershipKey = address?.toLowerCase() ?? "";
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async log scan, not a sync setState
-    scanHeirVaults();
-  }, [scanHeirVaults]);
-
-  // ── Guardian-side discovery: scan GuardianAdded logs for this address,
-  // then confirm current guardianship (handles removals) ──
-  const [guardianVaults, setGuardianVaults] = useState<HeirVaultEntry[]>([]);
-  const [isLoadingGuardianVaults, setIsLoadingGuardianVaults] = useState(false);
-
-  const scanGuardianVaults = useCallback(async () => {
-    if (!publicClient || !address || !guardianAddedEvent) return;
-    try {
-      setIsLoadingGuardianVaults(true);
-      const logs = await publicClient.getLogs({
-        event: guardianAddedEvent,
-        args: { guardian: address },
-        fromBlock: 0n,
-        toBlock: "latest",
+    if (!publicClient || !address || !CONTRACT_ADDRESSES.factory) return;
+    let cancelled = false;
+    const key = address.toLowerCase();
+    findMemberships(publicClient, address)
+      .then((found) => {
+        if (!cancelled) setMembership({ key, ...found, error: null });
+      })
+      .catch((err) => {
+        console.error("❌ [Dashboard] Failed to find vaults that list you:", err);
+        if (!cancelled) {
+          setMembership({
+            key,
+            heirVaults: [],
+            guardianVaults: [],
+            error: "Could not check which vaults list you right now. Use manual lookup below instead.",
+          });
+        }
       });
-      const candidates = Array.from(new Set(logs.map((l) => l.address)));
-
-      const results = await Promise.all(
-        candidates.map(async (vault): Promise<HeirVaultEntry | null> => {
-          const [isGuardianNow, statusNow, ownerNow] = await Promise.all([
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "isGuardian", args: [address] }),
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "getStatus" }),
-            publicClient.readContract({ address: vault, abi: LegacyVaultABI, functionName: "owner" }),
-          ]);
-          if (!isGuardianNow) return null;
-          const meta = await fetchVaultMeta(vault);
-          return {
-            vault,
-            status: Number(statusNow) as VaultStatus,
-            owner: ownerNow as `0x${string}`,
-            vaultName: meta?.vaultName,
-            ownerName: meta?.ownerName,
-          };
-        })
-      );
-
-      setGuardianVaults(results.filter((r): r is HeirVaultEntry => r !== null));
-    } catch (err) {
-      console.error("❌ [Dashboard] Failed to scan for guardian vaults:", err);
-    } finally {
-      setIsLoadingGuardianVaults(false);
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [publicClient, address]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async log scan, not a sync setState
-    scanGuardianVaults();
-  }, [scanGuardianVaults]);
+  const currentMembership = membership?.key === membershipKey ? membership : null;
+  const heirVaults = currentMembership?.heirVaults ?? [];
+  const guardianVaults = currentMembership?.guardianVaults ?? [];
+  const heirScanError = currentMembership?.error ?? null;
+  const isLoadingHeirVaults = Boolean(address && CONTRACT_ADDRESSES.factory) && !currentMembership;
+  const isLoadingGuardianVaults = isLoadingHeirVaults;
 
   const hasOwned = ownedVaults.length > 0;
 

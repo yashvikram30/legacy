@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useDialogBehavior } from "@/hooks/useDialogBehavior";
+import { explorerTxUrl, CHAIN_NAME } from "@/lib/constants";
 
 export type DeploymentStage =
   | "idle"
@@ -27,7 +28,7 @@ interface VaultDeploymentModalProps {
 // visible step covers a group of them.
 const STEPS: { label: string; activeOn: DeploymentStage[] }[] = [
   { label: "Confirm in your wallet", activeOn: ["requesting_signature"] },
-  { label: "Create vault on World Chain", activeOn: ["broadcasting", "confirming", "indexing"] },
+  { label: `Create vault on ${CHAIN_NAME}`, activeOn: ["broadcasting", "confirming", "indexing"] },
   { label: "Finish setup", activeOn: ["syncing"] },
 ];
 
@@ -153,7 +154,7 @@ export function VaultDeploymentModal({
         <div className="flow-footer">
           {txHash ? (
             <a
-              href={`https://sepolia.worldscan.org/tx/${txHash}`}
+              href={explorerTxUrl(txHash)}
               target="_blank"
               rel="noopener noreferrer"
               className="flow-link"

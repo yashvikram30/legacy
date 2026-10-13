@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAddress, createPublicClient, http } from "viem";
-import { worldChainSepolia } from "@/lib/constants";
+import { activeChain, ACTIVE_RPC_URL } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { getSubscription } from "@/lib/notifications/store";
 import { dispatchClaimAlert } from "@/lib/notifications/dispatcher";
@@ -30,10 +30,9 @@ export async function POST(request: Request) {
     let contestableSeconds = 604800; // default 7 days fallback
     try {
       const publicClient = createPublicClient({
-        chain: worldChainSepolia,
+        chain: activeChain,
         transport: http(
-          process.env.NEXT_PUBLIC_WORLD_CHAIN_RPC_URL ||
-            "https://worldchain-sepolia.gateway.tenderly.co"
+          ACTIVE_RPC_URL
         ),
       });
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createPublicClient, http, isAddress } from "viem";
-import { worldChainSepolia } from "@/lib/constants";
+import { activeChain, ACTIVE_RPC_URL } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { getAllSubscriptions, updateLastAlert, updateLastClaimAlert } from "@/lib/notifications/store";
 import {
@@ -144,10 +144,9 @@ async function handleHeartbeatCheck(request: Request) {
     }
 
     const publicClient = createPublicClient({
-      chain: worldChainSepolia,
+      chain: activeChain,
       transport: http(
-        process.env.NEXT_PUBLIC_WORLD_CHAIN_RPC_URL ||
-          "https://worldchain-sepolia.gateway.tenderly.co"
+        ACTIVE_RPC_URL
       ),
     });
 

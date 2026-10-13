@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAccount, useChainId, useSwitchChain, useReadContract } from "wagmi";
 import { useWalletModal } from "./WalletModal";
-import { worldChainSepolia, CONTRACT_ADDRESSES } from "@/lib/constants";
+import { activeChain, CONTRACT_ADDRESSES, CHAIN_NAME } from "@/lib/constants";
 import { LegacyVaultFactoryABI } from "@/lib/contracts/abis";
 
 export function Header() {
@@ -18,7 +18,7 @@ export function Header() {
   const { openConnectModal, openAccountModal } = useWalletModal();
 
   const isLanding = pathname === "/";
-  const isWrongChain = isConnected && chainId !== worldChainSepolia.id;
+  const isWrongChain = isConnected && chainId !== activeChain.id;
 
   // Read whether the connected wallet already has deployed vaults
   const { data: userVaults } = useReadContract({
@@ -227,11 +227,11 @@ export function Header() {
             ) : isWrongChain ? (
               /* Wrong Network State */
               <button
-                onClick={() => switchChain?.({ chainId: worldChainSepolia.id })}
+                onClick={() => switchChain?.({ chainId: activeChain.id })}
                 type="button"
                 className="btn-chain-wrong"
                 id="switch-chain-btn"
-                title="Click to switch to World Chain Sepolia"
+                title={`Click to switch to ${CHAIN_NAME}`}
               >
                 Wrong Network
               </button>

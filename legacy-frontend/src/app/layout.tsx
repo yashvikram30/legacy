@@ -8,10 +8,10 @@ import { mursGothic } from "@/lib/fonts";
 export const metadata: Metadata = {
   title: "LEGACY · Autonomous Succession Protocol",
   description:
-    "Self-sovereign digital inheritance and dead man's switch on World Chain, cryptographically guarded by World ID Proof of Personhood.",
+    "Non-custodial crypto inheritance on Monad. Assets never leave your wallet, and you prove you're alive with a passkey verified on-chain. No seed phrase.",
   openGraph: {
     title: "LEGACY · Autonomous Succession Protocol",
-    description: "Self-sovereign digital inheritance and dead man's switch on World Chain.",
+    description: "Non-custodial crypto inheritance on Monad, with passkey check-ins verified on-chain.",
     type: "website",
   },
   icons: {

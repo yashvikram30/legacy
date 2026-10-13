@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CONTRACT_ADDRESSES } from "@/lib/constants";
+import { CONTRACT_ADDRESSES, explorerAddressUrl, CHAIN_NAME, activeChain } from "@/lib/constants";
 
 export function Footer() {
   const pathname = usePathname();
@@ -38,7 +38,7 @@ export function Footer() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontWeight: 800, color: "#ffffff", letterSpacing: "0.06em" }}>LEGACY PROTOCOL</span>
           <span>·</span>
-          <span>WORLD CHAIN SEPOLIA (CHAIN ID 4801)</span>
+          <span>{CHAIN_NAME.toUpperCase()} (CHAIN ID {activeChain.id})</span>
         </div>
 
         <div style={{ display: "flex", gap: "24px", alignItems: "center", flexWrap: "wrap" }}>
@@ -52,7 +52,7 @@ export function Footer() {
             Lookup
           </Link>
           <a
-            href={`https://sepolia.worldscan.org/address/${CONTRACT_ADDRESSES.factory}`}
+            href={explorerAddressUrl(CONTRACT_ADDRESSES.factory)}
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "var(--text-secondary)", textDecoration: "none" }}
@@ -60,7 +60,7 @@ export function Footer() {
             Factory: {CONTRACT_ADDRESSES.factory.slice(0, 6)}…{CONTRACT_ADDRESSES.factory.slice(-4)} ↗
           </a>
           <a
-            href={`https://sepolia.worldscan.org/address/${CONTRACT_ADDRESSES.verifier}`}
+            href={explorerAddressUrl(CONTRACT_ADDRESSES.verifier)}
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "var(--text-secondary)", textDecoration: "none" }}

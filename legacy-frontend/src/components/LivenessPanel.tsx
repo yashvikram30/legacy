@@ -77,7 +77,7 @@ export function LivenessPanel({
   const statusColor = "var(--text-secondary)";
 
   const headline = !livenessRegistered
-    ? "Set up World ID to start"
+    ? "Set up your passkey to start"
     : status === VaultStatus.Green
     ? "You're all set"
     : status === VaultStatus.Amber
@@ -85,7 +85,7 @@ export function LivenessPanel({
     : "Your heirs can claim";
 
   const description = !livenessRegistered
-    ? "Link your World ID once. After that, checking in takes one scan."
+    ? "Create a passkey once. After that, checking in takes one touch of your fingerprint or face."
     : status === VaultStatus.Green
     ? "Nothing to do until the timer runs out."
     : status === VaultStatus.Amber
@@ -120,7 +120,7 @@ export function LivenessPanel({
         <p className="status-desc">{description}</p>
 
         <button type="button" onClick={onOpenCheckIn} className="flow-btn status-cta" id="trigger-checkin-btn">
-          {livenessRegistered ? "Check in with World ID" : "Set up World ID"}
+          {livenessRegistered ? "Check in with passkey" : "Set up passkey"}
         </button>
 
         <ol className="status-track" aria-label="Vault lifecycle">

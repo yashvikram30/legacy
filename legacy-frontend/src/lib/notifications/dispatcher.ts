@@ -1,4 +1,5 @@
 import { VaultNotificationSubscription, AlertThreshold, NotificationChannel } from "@/types/notifications";
+import { CHAIN_NAME } from "@/lib/constants";
 import { sendEmailNotification } from "./email";
 import { sendPushNotification } from "./push";
 import { recordAlertLog } from "./store";
@@ -114,7 +115,7 @@ function generateEmailTemplate({
           <!-- Footer -->
           <tr>
             <td style="padding: 20px 32px; border-top: 1px solid #2E353A; background-color: #141A1E; font-size: 12px; color: #9A9E98; line-height: 1.5;">
-              This is an autonomous on-chain alert dispatched by Legacy Protocol on World Chain Sepolia.<br>
+              This is an autonomous on-chain alert dispatched by Legacy Protocol on ${CHAIN_NAME}.<br>
               You received this message because this email was designated as the emergency contact for vault <code>${vaultAddress}</code>.
             </td>
           </tr>
@@ -147,7 +148,7 @@ export async function dispatchHeartbeatAlert(
     subject = `[URGENT] Legacy Vault Enters Amber Grace Period in ${formattedTime}`;
     statusBadge = "Imminent Amber";
     statusColor = "#D99A3D";
-    explanation = `Your Legacy Vault will transition into the <strong>Amber Grace Period</strong> in ${formattedTime}. Verify your liveness with World ID to keep your vault in the Green state and prevent estate succession.`;
+    explanation = `Your Legacy Vault will transition into the <strong>Amber Grace Period</strong> in ${formattedTime}. Check in with your passkey to keep your vault in the Green state and prevent estate succession.`;
   } else if (threshold === "amber") {
     subject = `[ALERT] Legacy Vault Has Entered Amber Grace Period`;
     statusBadge = "Amber Status";
@@ -162,7 +163,7 @@ export async function dispatchHeartbeatAlert(
     vaultAddress: sub.vaultAddress,
     explanation,
     timeHighlight: formattedTime,
-    ctaText: "Check In with World ID",
+    ctaText: "Check In with Passkey",
     ctaUrl: vaultUrl,
   });
 
@@ -215,7 +216,7 @@ export async function dispatchVaultCreatedAlert(
   const vaultUrl = baseUrl;
 
   const subject = `[Legacy Vault] Vault Armed — Short ${formattedInterval} Liveness Window`;
-  const explanation = `Your Legacy Vault <code>${shortVault}</code> is now live and monitored. You configured a proof-of-liveness cadence of <strong>${formattedInterval}</strong>, which is under the standard 7-day window — so your first check-in deadline will arrive soon and the window will get over quickly. Perform a World ID check-in before it closes to keep the vault in the Green state.`;
+  const explanation = `Your Legacy Vault <code>${shortVault}</code> is now live and monitored. You configured a proof-of-liveness cadence of <strong>${formattedInterval}</strong>, which is under the standard 7-day window — so your first check-in deadline will arrive soon and the window will get over quickly. Check in with your passkey before it closes to keep the vault in the Green state.`;
 
   const html = generateEmailTemplate({
     headline: "Vault Armed — Liveness Window Closing Soon",
@@ -224,7 +225,7 @@ export async function dispatchVaultCreatedAlert(
     vaultAddress: sub.vaultAddress,
     explanation,
     timeHighlight: `${formattedInterval} cadence`,
-    ctaText: "Check In with World ID",
+    ctaText: "Check In with Passkey",
     ctaUrl: vaultUrl,
   });
 
@@ -235,7 +236,7 @@ export async function dispatchVaultCreatedAlert(
       to: sub.email,
       subject,
       html,
-      text: `Your Legacy Vault ${sub.vaultAddress} is armed with a short ${formattedInterval} liveness window and will get over soon. Check in with World ID: ${vaultUrl}`,
+      text: `Your Legacy Vault ${sub.vaultAddress} is armed with a short ${formattedInterval} liveness window and will get over soon. Check in with your passkey: ${vaultUrl}`,
     });
     if (res.success) channelsNotified.push("email");
   }
@@ -274,7 +275,7 @@ export async function dispatchClaimAlert(
   const vaultUrl = baseUrl;
 
   const subject = `[URGENT] Contestable Succession Claim Initiated on Vault ${shortVault}`;
-  const explanation = `Heir <code>${heirAddress}</code> has initiated succession on your Legacy Vault. The contestable challenge window is now running.<br><br><strong>Owner Veto Right:</strong> If you are alive and well, you can invalidate and abort this claim at any time during this window simply by performing a World ID check-in.`;
+  const explanation = `Heir <code>${heirAddress}</code> has initiated succession on your Legacy Vault. The contestable challenge window is now running.<br><br><strong>Owner Veto Right:</strong> If you are alive and well, you can invalidate and abort this claim at any time during this window simply by checking in with your passkey.`;
 
   const html = generateEmailTemplate({
     headline: "Contestable Succession Claim Initiated",
@@ -336,7 +337,7 @@ export async function dispatchClaimExpiringAlert(
   const vaultUrl = baseUrl;
 
   const subject = `[URGENT] Final ${formattedTime} to Veto Succession Claim on Vault ${shortVault}`;
-  const explanation = `The contestable challenge window for the succession claim initiated by heir <code>${heirAddress}</code> is about to close in <strong>${formattedTime}</strong>.<br><br><strong>Owner Veto Right:</strong> If you are alive and wish to retain custody of your assets, you must perform a World ID check-in immediately before this window closes to invalidate this claim.`;
+  const explanation = `The contestable challenge window for the succession claim initiated by heir <code>${heirAddress}</code> is about to close in <strong>${formattedTime}</strong>.<br><br><strong>Owner Veto Right:</strong> If you are alive and wish to retain custody of your assets, you must check in with your passkey immediately before this window closes to invalidate this claim.`;
 
   const html = generateEmailTemplate({
     headline: "Final Hours to Veto Succession Claim",

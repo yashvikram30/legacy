@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useReadContract, useWriteContract, usePublicClient, useChainId, useSwitchChain } from "wagmi";
-import { worldChainSepolia } from "@/lib/constants";
+import { activeChain } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 
 interface GuardianAttestationPanelProps {
@@ -20,7 +20,7 @@ export function GuardianAttestationPanel({ vaultAddress, viewerAddress }: Guardi
   const publicClient = usePublicClient();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const isWrongChain = chainId !== worldChainSepolia.id;
+  const isWrongChain = chainId !== activeChain.id;
   const { writeContractAsync } = useWriteContract();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,10 +81,10 @@ export function GuardianAttestationPanel({ vaultAddress, viewerAddress }: Guardi
       setIsSubmitting(true);
       setError(null);
       if (isWrongChain && switchChain) {
-        await switchChain({ chainId: worldChainSepolia.id });
+        await switchChain({ chainId: activeChain.id });
       }
       const hash = await writeContractAsync({
-        chainId: worldChainSepolia.id,
+        chainId: activeChain.id,
         address: vaultAddress,
         abi: LegacyVaultABI,
         functionName: fn,

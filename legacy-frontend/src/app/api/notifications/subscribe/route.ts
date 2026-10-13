@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createPublicClient, http, isAddress } from "viem";
 import { getSubscription, saveSubscription } from "@/lib/notifications/store";
 import { dispatchVaultCreatedAlert, SEVEN_DAYS_SECONDS } from "@/lib/notifications/dispatcher";
-import { worldChainSepolia } from "@/lib/constants";
+import { activeChain, ACTIVE_RPC_URL } from "@/lib/constants";
 import { LegacyVaultABI } from "@/lib/contracts/abis";
 import { SubscribeRequest } from "@/types/notifications";
 
@@ -65,10 +65,9 @@ export async function POST(request: Request) {
     if (isNewlyArmedEmail) {
       try {
         const publicClient = createPublicClient({
-          chain: worldChainSepolia,
+          chain: activeChain,
           transport: http(
-            process.env.NEXT_PUBLIC_WORLD_CHAIN_RPC_URL ||
-              "https://worldchain-sepolia.gateway.tenderly.co"
+            ACTIVE_RPC_URL
           ),
         });
         const checkInIntervalRaw = await publicClient.readContract({

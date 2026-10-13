@@ -78,7 +78,7 @@ export function StatusLamp({
   const bigWord = !isRegistered ? "Not set up" : VAULT_STATUS_COPY[status].label;
 
   const statusDescription = !isRegistered
-    ? "The owner hasn't set up World ID check-ins yet."
+    ? "The owner hasn't set up passkey check-ins yet."
     : status === VaultStatus.Green
     ? "The owner is checking in. Nothing for heirs to do."
     : status === VaultStatus.Amber

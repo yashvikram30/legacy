@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { explorerAddressUrl, CHAIN_NAME, EXPLORER_NAME } from "@/lib/constants";
 
 interface VaultConfigRailProps {
   checkInInterval: bigint;
@@ -146,7 +147,7 @@ export function VaultConfigRail({
           >
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-secondary)" }}>Network:</span>
-              <span style={{ color: "#ffffff" }}>World Chain Sepolia</span>
+              <span style={{ color: "#ffffff" }}>{CHAIN_NAME}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--text-secondary)" }}>Custody:</span>
@@ -212,7 +213,7 @@ export function VaultConfigRail({
       {vaultAddress && (
         <div>
           <a
-            href={`https://sepolia.worldscan.org/address/${vaultAddress}`}
+            href={explorerAddressUrl(vaultAddress)}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -226,7 +227,7 @@ export function VaultConfigRail({
               textUnderlineOffset: "3px",
             }}
           >
-            <span>View on Worldscan</span>
+            <span>View on {EXPLORER_NAME}</span>
             <span aria-hidden="true">↗</span>
           </a>
         </div>

@@ -127,7 +127,7 @@ export function GuardianList({
           </div>
           {deathConfirmed && (
             <span style={{ color: "var(--status-red)", fontSize: "0.8125rem", fontWeight: 600 }}>
-              Unanimous — accelerated succession is active. Check in with World ID to cancel.
+              Unanimous — accelerated succession is active. Check in with your passkey to cancel.
             </span>
           )}
         </div>

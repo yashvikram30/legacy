@@ -1,0 +1,22 @@
+{
+  "network": "monad-testnet",
+  "chainId": 10143,
+  "deployer": "0x27262Bd8d78503d2bAb80165c137459435CCb8c8",
+  "contracts": {
+    "PasskeyVerifierAdapter": "0xe72de0e5279429b097d2ca03ab95ec315d022314",
+    "LegacyVault": "0xd7f49d01e73c889ab9fbcc209b79ba84f632b514",
+    "LegacyVaultFactory": "0xee99be33c48c1362e66fb3db773018db1cc1eacf",
+    "LegacyPolicyEngine": "0xc94efc123dde0e590882f261996b65c5f018ed06"
+  },
+  "deploymentTransactions": {
+    "PasskeyVerifierAdapter": "0x073bc8b0477ee5d00efd6dd65bdc7c34b09af973baee32198e3541e45a1d04f7",
+    "LegacyVault": "0x3acd84eeee1264eb0872b8a6309305e20810c9b6f08f0bb78a17895264ee950c",
+    "LegacyVaultFactory": "0xaa922f4994e19fcf368212feba80e6bf0cab38df1bbfe2f7973014af5e9b4c9e",
+    "LegacyPolicyEngine": "0x2ba32c93554805c80f67f9f8e8023ef97f94b6fa0eca9fd4e9144c4ae8963ca9"
+  },
+  "smokeTest": {
+    "createVaultTx": "0x9c32b64be51377773ebe1cc1c2422cd3f087347c1b85d45708e36af3cfe31697",
+    "vault": "0x3F7C7483A6993Ffd2bb084549785BE64aEDD4F37",
+    "status": "Green"
+  }
+}
