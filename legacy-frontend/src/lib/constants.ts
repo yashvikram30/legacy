@@ -27,13 +27,36 @@ const EXPLORER_URL = activeChain.blockExplorers?.default.url ?? "";
 export const explorerAddressUrl = (address: string) => `${EXPLORER_URL}/address/${address}`;
 export const explorerTxUrl = (hash: string) => `${EXPLORER_URL}/tx/${hash}`;
 
+// The canonical Legacy deployment on each network (see
+// legacy-contract/deployments/), so the app works with no configuration.
+const DEPLOYMENTS = {
+  testnet: {
+    factory: "0xEe99BE33c48C1362e66fb3db773018Db1cC1eacF",
+    verifier: "0xe72de0e5279429b097d2Ca03AB95EC315D022314",
+    implementation: "0xD7F49d01E73C889ab9fBcc209B79Ba84f632b514",
+    policyEngine: "0xC94efC123dDE0E590882F261996B65c5F018eD06",
+    smokeVault: "0x3F7C7483A6993Ffd2bb084549785BE64aEDD4F37",
+  },
+  mainnet: { factory: "", verifier: "", implementation: "", policyEngine: "", smokeVault: "" },
+} as const;
+
+const DEPLOYMENT = IS_MAINNET ? DEPLOYMENTS.mainnet : DEPLOYMENTS.testnet;
+
+// Address overrides only apply once NEXT_PUBLIC_CHAIN is set, i.e. the
+// environment has been configured for Monad. A hosting environment still
+// carrying the old World Chain addresses would otherwise point this app at
+// contracts that don't exist on Monad.
+const CONFIGURED_FOR_MONAD = Boolean(process.env.NEXT_PUBLIC_CHAIN);
+const address = (override: string | undefined, fallback: string) =>
+  ((CONFIGURED_FOR_MONAD && override) || fallback) as `0x${string}`;
+
 export const CONTRACT_ADDRESSES = {
-  factory: (process.env.NEXT_PUBLIC_FACTORY_ADDRESS || "") as `0x${string}`,
+  factory: address(process.env.NEXT_PUBLIC_FACTORY_ADDRESS, DEPLOYMENT.factory),
   /** PasskeyVerifierAdapter: every vault created by this app checks in with a passkey. */
-  verifier: (process.env.NEXT_PUBLIC_VERIFIER_ADDRESS || "") as `0x${string}`,
-  implementation: (process.env.NEXT_PUBLIC_IMPLEMENTATION_ADDRESS || "") as `0x${string}`,
-  smokeVault: (process.env.NEXT_PUBLIC_SMOKE_VAULT_ADDRESS || "") as `0x${string}`,
-  policyEngine: (process.env.NEXT_PUBLIC_POLICY_ENGINE_ADDRESS || "") as `0x${string}`,
+  verifier: address(process.env.NEXT_PUBLIC_VERIFIER_ADDRESS, DEPLOYMENT.verifier),
+  implementation: address(process.env.NEXT_PUBLIC_IMPLEMENTATION_ADDRESS, DEPLOYMENT.implementation),
+  smokeVault: address(process.env.NEXT_PUBLIC_SMOKE_VAULT_ADDRESS, DEPLOYMENT.smokeVault),
+  policyEngine: address(process.env.NEXT_PUBLIC_POLICY_ENGINE_ADDRESS, DEPLOYMENT.policyEngine),
 };
 
 /**
