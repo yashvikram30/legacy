@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="#000000"/>
-  <circle cx="256" cy="256" r="160" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="42"/>
-  <g transform="rotate(-90 256 256)">
-    <circle cx="256" cy="256" r="160" fill="none" stroke="#C99A5A" stroke-width="42"
-      stroke-linecap="round"
-      stroke-dasharray="743.9 1005.3"/>
-  </g>
-  <circle cx="256" cy="256" r="42" fill="#F2EFE9"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0B0E11"/><circle cx="256" cy="256" r="200" fill="none" stroke="#F2EFE9" stroke-opacity="1.0" stroke-width="44" stroke-linecap="round" stroke-dasharray="942.48 1256.64" transform="rotate(-90 256 256)"/><mask id="kf"><rect width="512" height="512" fill="#fff"/><path d="M199.88,207.20 a56.12,56.12 0 1,0 112.24,0 a56.12,56.12 0 1,0 -112.24,0 Z" fill="#000"/><path d="M229.16,224.28 L282.84,224.28 L305.84,330.42 Q309.68,341.40 293.21,341.40 L218.79,341.40 Q202.32,341.40 206.16,330.42 Z" fill="#000"/></mask><circle cx="256" cy="256" r="158" fill="#C99A5A" mask="url(#kf)"/></svg>

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CONTRACT_ADDRESSES, explorerAddressUrl, CHAIN_NAME, activeChain } from "@/lib/constants";
@@ -36,6 +37,7 @@ export function Footer() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <Image src="/brand/logo-glyph-on-dark.svg" alt="" width={18} height={18} unoptimized style={{ verticalAlign: "middle" }} />
           <span style={{ fontWeight: 800, color: "#ffffff", letterSpacing: "0.06em" }}>LEGACY PROTOCOL</span>
           <span>·</span>
           <span>{CHAIN_NAME.toUpperCase()} (CHAIN ID {activeChain.id})</span>
