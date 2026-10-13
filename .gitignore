@@ -18,7 +18,6 @@ legacy-contract/cache/
 legacy-contract/broadcast/
 legacy-contract/flattened/
 legacy-contract/.gas-snapshot
-legacy-contract/lib/
 
 # System files
 .DS_Store
